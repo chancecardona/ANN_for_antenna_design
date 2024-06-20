@@ -9,7 +9,7 @@ import skrf
 import matplotlib.pyplot as mplt
 
 # Y is the frequency response of S_param. Should have n values of shape [freq, real, imag]
-def vector_fitting(Y : np.ndarray) -> np.ndarray:
+def vector_fitting(Y : np.ndarray, verbose : bool = True, display : bool = False) -> np.ndarray:
     n_samples = len(Y)
     W = len(Y[0][0])
     # For each candidate sample, we have W [freq, r, i] S-param values
@@ -29,15 +29,19 @@ def vector_fitting(Y : np.ndarray) -> np.ndarray:
         ntwk = skrf.Network(frequency=freqs, s=S_11, name="Frequency Response")
         vf = skrf.VectorFitting(ntwk)
         vf.auto_fit()
-        vf.plot_convergence()
-       
         model_orders[i] = vf.get_model_order(vf.poles)
-        print(f'model order for sample {i} = {model_orders[i]}')
-        print(f'n_poles_real = {np.sum(vf.poles.imag == 0.0)}')
-        print(f'n_poles_complex = {np.sum(vf.poles.imag > 0.0)}')
-        print(f'RMS Error = {vf.get_rms_error()}')
-        
-        vf.plot_s_db()
+        if verbose:
+            print(f'model order for sample {i} = {model_orders[i]}')
+            print(f'n_poles_real = {np.sum(vf.poles.imag == 0.0)}')
+            print(f'n_poles_complex = {np.sum(vf.poles.imag > 0.0)}')
+            print(f'RMS Error = {vf.get_rms_error()}')
+        if display: 
+            fig, ax = mplt.subplots(2, 1)
+            fig.set_size_inches(6, 8)
+            vf.plot_convergence(ax=ax[0]) 
+            vf.plot_s_db(ax=ax[1])
+            mplt.tight_layout()
+            mplt.show()
           
     return model_orders
 
@@ -95,11 +99,11 @@ print(f"Predicted: {model_orders_test_predicted}")
   
 # Evaluate Average training MAPE
 err = mean_absolute_percentage_error(model_orders_observed, model_orders_predicted)
-print(f"Training MAPE is: {err}%")
+print(f"Training SVM MAPE is: {err}%")
 
 # Evaluate Average testing MAPE
 err = mean_absolute_percentage_error(model_orders_test_observed, model_orders_test_predicted)
-print(f"Testing MAPE is: {err}%")
+print(f"Testing SVM MAPE is: {err}%")
 
 # Train ANN:
 # EM simulation results:
@@ -117,7 +121,7 @@ print(f"Testing MAPE is: {err}%")
 # input: x (vector of geometrical variables) 
 # output: TF coefficients of S-parameter (this is what we want to train)
 
-# Loss: PoleResidueTF(x, freq) - EMResponse(x, freq)
+# Loss: h(PoleResidueTF(x, freq) - S_response)
 
 # Pole Residue Transfer Function:
 # H(s) = Sigma(r_i / (s - p_i)) from i=1 to Q (Q is the order of the TF)

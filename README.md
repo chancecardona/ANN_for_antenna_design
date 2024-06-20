@@ -22,7 +22,8 @@ Neuro-TF Model:
         output: S-parameters (real, imaginary)
 
 Then the error of these is compared to those simulated with HFSS EM.
-For specifics on the TF and NN structure see: [Parametric Modeling of EM Behavior of Microwave Components using Combined NN's and Hybrid TF's](https://www.researchgate.net/publication/340908715_Parametric_Modeling_of_EM_Behavior_of_Microwave_Components_Using_Combined_Neural_Networks_and_Hybrid-Based_Transfer_Functions/fulltext/5ea38b8392851c1a906d0b23/Parametric-Modeling-of-EM-Behavior-of-Microwave-Components-Using-Combined-Neural-Networks-and-Hybrid-Based-Transfer-Functions.pdf)
+For specifics on the TF layout and interaction: [Parametric Modeling of EM Behavior of Microwave Components using Combined NN's and Hybrid TF's](https://www.researchgate.net/publication/340908715_Parametric_Modeling_of_EM_Behavior_of_Microwave_Components_Using_Combined_Neural_Networks_and_Hybrid-Based_Transfer_Functions/fulltext/5ea38b8392851c1a906d0b23/Parametric-Modeling-of-EM-Behavior-of-Microwave-Components-Using-Combined-Neural-Networks-and-Hybrid-Based-Transfer-Functions.pdf)
+For the NN implementation defaults such as number of layers please see: "Neural Network Approached to Electromagnetic Based Modeling of Passive Components".
 
 We also need to sort the ANN's by the TF order.
 So we first need to pre-train the ANN using vector fitting.
@@ -35,7 +36,7 @@ Vector Fitting: Obtains the poles and residues of the TF corresponding to the in
    If there are no resonance peaks (very smooth) should check if soln is not well-defined.
    See Gustavsen1999 for more info.
 
-   Also need SVD (of k rows of the a_bar values), then take its S values and make sure none are small (under machine precision limit ~1e-12). 
+   Also need SVD (of k rows of the a_bar values), then take its S values and plot to make sure none are small (under machine precision limit ~1e-12). 
 
 ### Data Format
 There are 2 data files, a training one used in the ANN training process, and a testing one used for ANN validation after training.  

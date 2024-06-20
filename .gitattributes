@@ -1,2 +1,8 @@
 Real_Test_Data.mat filter=lfs diff=lfs merge=lfs -text
 Training_Data.mat filter=lfs diff=lfs merge=lfs -text
+n9_freq_response.fig filter=lfs diff=lfs merge=lfs -text
+n34_freq_response.fig filter=lfs diff=lfs merge=lfs -text
+n58_freq_response.fig filter=lfs diff=lfs merge=lfs -text
+n24_vector_fitting.png filter=lfs diff=lfs merge=lfs -text
+n1_vector_fitting.png filter=lfs diff=lfs merge=lfs -text
+n20_vector_fitting.png filter=lfs diff=lfs merge=lfs -text
