@@ -2,19 +2,42 @@ import os
 import numpy as np
 import scipy.io # Read Matlab files
 from sklearn import svm # SVM
+from sklearn.metrics import mean_absolute_percentage_error
 import skrf
 import matplotlib.pyplot as mplt
 
-def mean_abs_percentage_error(y_observed : np.ndarray, y_predicted : np.ndarray):
-    N = min(len(y_observed), len(y_predicted))
-    sum = 0
-    for n in range(N):
-        sum += 100 * abs((y_observed[n] - y_predicted[n]) / y_predicted[n])
-    sum /= N
-    return sum
-
-#def vector_fit(freq_response : np.ndarray):
-
+# Y is the frequency response of S_param. Should have n values of shape [freq, real, imag]
+def vector_fitting(Y : np.ndarray) -> np.ndarray:
+    n_samples = len(Y)
+    W = len(Y[0][0])
+    # For each candidate sample, we have W [freq, r, i] S-param values
+    print(f"Sanity check, using {n_samples} samples.")
+    # Reserve matrix for the model orders for SVM training
+    model_orders = np.zeros(n_samples, dtype=np.uint8)
+    
+    for i in range(n_samples):
+        print("Starting candidate sample", i)
+        # Get the complex and real components for each freq sample
+        S_11 = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
+        print("Sanity check, len of S vector:", len(S_11))
+        #S_dB = 20*log10(S_11)
+        freqs = Y[i][0][:, 0]
+    
+        # TODO: is this fine as the S matrix?
+        ntwk = skrf.Network(frequency=freqs, s=S_11, name="Frequency Response")
+        vf = skrf.VectorFitting(ntwk)
+        vf.auto_fit()
+        vf.plot_convergence()
+       
+        model_orders[i] = vf.get_model_order(vf.poles)
+        print(f'model order for sample {i} = {model_orders[i]}')
+        print(f'n_poles_real = {np.sum(vf.poles.imag == 0.0)}')
+        print(f'n_poles_complex = {np.sum(vf.poles.imag > 0.0)}')
+        print(f'RMS Error = {vf.get_rms_error()}')
+        
+        vf.plot_s_db()
+          
+    return model_orders
 
 # Get current dir
 cur_dir = os.path.dirname(os.path.realpath(__file__))
@@ -38,40 +61,11 @@ X_test = test_data["real_test_candidates"]
 Y_test = test_data["real_test_responses"]
 
 GHz = 10^9
-n_samples = len(Y)
 n_test_samples = len(Y_test)
-W = len(Y[0][0])
 W_test = len(Y_test[0][0])
-#freq = np.linspace(8*Ghz, 12*Ghz, W)  # Value they used in literature.
 
 # Vector Fitting
-# For each candidate sample, we have W [freq, r, i] S-param values
-print(f"Sanity check, using {n_samples} samples.")
-# Reserve matrix for the model orders for SVM training
-model_orders = np.zeros(n_samples)
-
-for i in range(n_samples):
-    print("Starting candidate sample", i)
-    # Get the complex and real components for each freq sample
-    S_11 = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
-    print("Sanity check, len of S vector:", len(S_11))
-    #S_dB = 20*log10(S_11)
-    freqs = Y[i][0][:, 0]
-
-    # TODO: is this fine as the S matrix?
-    ntwk = skrf.Network(frequency=freqs, s=S_11, name="Frequency Response")
-    vf = skrf.VectorFitting(ntwk)
-    vf.auto_fit()
-    vf.plot_convergence()
-   
-    model_orders[i] = vf.get_model_order(vf.poles)
-    print(f'model order for sample {i} = {model_orders[i]}')
-    print(f'n_poles_real = {np.sum(vf.poles.imag == 0.0)}')
-    print(f'n_poles_complex = {np.sum(vf.poles.imag > 0.0)}')
-    print(f'RMS Error = {vf.get_rms_error()}')
-    
-    vf.plot_s_db()
-          
+model_orders = vector_fitting(Y)
 
 ## Hard for chaotic TF orders to train ANN accurately. 
 ## -> group original training samples into different categories C_k (K categories)
@@ -85,7 +79,6 @@ for i in range(n_samples):
 print("Training SVM now.")
 clf = svm.SVC()
 clf.fit(X, model_orders)
-
 ## SVM Training 
 # SVM Input: geometrical variables
 # SVM Output: TF Order (vector fitting on S-param in f-space)
@@ -94,34 +87,14 @@ clf.fit(X, model_orders)
  
 
 # Classify:
-model_orders_test_observed = np.zeros(n_test_samples)
-#model_orders_test_predicted = np.zeros(n_test_samples)
-for i in range(n_test_samples):
-    # Vector Fit on Test Data
-    print("Starting candidate sample", i)
-    # Get the complex and real components for each freq sample
-    S_11 = Y_test[i][0][:, 1] + (Y_test[i][0][:, 2] * 1j)
-    print("Sanity check, len of S vector:", len(S_11))
-    #S_dB = 20*log10(S_11)
-    freqs = Y_test[i][0][:, 0]
-    # TODO: is this fine as the S matrix?
-    ntwk = skrf.Network(frequency=freqs, s=S_11, name="Frequency Response")
-    vf = skrf.VectorFitting(ntwk)
-    vf.auto_fit()
-    vf.plot_convergence() 
-    model_orders_test_observed[i] = vf.get_model_order(vf.poles)
-    print(f'model order for sample {i} = {model_orders_test_observed[i]}')
-    print(f'n_poles_real = {np.sum(vf.poles.imag == 0.0)}')
-    print(f'n_poles_complex = {np.sum(vf.poles.imag > 0.0)}')
-    print(f'RMS Error = {vf.get_rms_error()}') 
-    vf.plot_s_db()
+model_orders_test_observed = vector_fitting(Y_test)
 
 # SVM predict on Test Data
 model_orders_test_predicted = clf.predict(X_test)
 print(f"Predicted: {model_orders_test_predicted}")
   
 # Evaluate Average training MAPE
-err = mean_abs_percentage_error(model_orders_test_observed, model_orders_test_predicted)
+err = mean_absolute_percentage_error(model_orders_test_observed, model_orders_test_predicted)
 print(f"Error is: {err}%")
 
 # Train ANN:
