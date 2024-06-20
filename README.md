@@ -44,3 +44,17 @@ Each data file has 2 rows "candidates", and "responses":
 - candidates: Geometrical Variables. 
   This should be 3 geometric variables considered during design, such as l_p (patch length), l_a (aperture length), and h_c (cavity height).
 - responses: [Freq, Real(S-Param), Imaginary(S-Param)]
+
+### Data Parameter Test Results:
+#### SVM Mape
+- Default no scaling (Scikit Linear SVC): 
+  Test: 6.47%
+- Scaled Data: 
+  Test: 4.406%, 4.01%, Train: 5.707%
+  (All data after this is assumed scaled as it helps)
+- RBF Kernel: 
+  Test: 4.406%, Train: 4.76%
+- Sigmoid Kernel: 
+  Test: 3.647%, Train: 4.90%
+- Polynomial Kernel: 
+  Test: 5.656%

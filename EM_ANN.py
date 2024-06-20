@@ -3,6 +3,8 @@ import numpy as np
 import scipy.io # Read Matlab files
 from sklearn import svm # SVM
 from sklearn.metrics import mean_absolute_percentage_error
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 import skrf
 import matplotlib.pyplot as mplt
 
@@ -60,42 +62,44 @@ Y = training_data["responses"]
 X_test = test_data["real_test_candidates"]
 Y_test = test_data["real_test_responses"]
 
-GHz = 10^9
-n_test_samples = len(Y_test)
-W_test = len(Y_test[0][0])
-
-# Vector Fitting
-model_orders = vector_fitting(Y)
-
-## Hard for chaotic TF orders to train ANN accurately. 
-## -> group original training samples into different categories C_k (K categories)
-## Then lets say order of each category (Q) = k, the index of the category. (group category by TF order)
-
+# Vector Fitting 
+# Just say the vector fitting results are "observations" for now...
+model_orders_observed = vector_fitting(Y)
 
 # Train SVM:
-
+# ['linear', 'poly', 'rbf', sigmoid']
 # Need to predict the Order based on the input S-parameter (over frequency space).
-# SVC for versatility in parameters, LinearSVC may be preferrable.
-print("Training SVM now.")
-clf = svm.SVC()
-clf.fit(X, model_orders)
-## SVM Training 
 # SVM Input: geometrical variables
 # SVM Output: TF Order (vector fitting on S-param in f-space)
-# SVM Error: Predicted TF Order - Vector Fit TF Order
+# SVM Error: Predicted TF Order - Vector Fit TF Order 
 
- 
+print("Training SVM now.")
+# SVC for versatility in parameters, LinearSVC may be preferrable.
+# TODO: one versus one, vs one versus rest (ovo vs ovho)
+# Scale data with the StandardScaler
+svc = svm.SVC(kernel='sigmoid')
+clf = make_pipeline(StandardScaler(), svc)
+clf.fit(X, model_orders_observed)
+
 
 # Classify:
 model_orders_test_observed = vector_fitting(Y_test)
+
+# SVM predict on Train Data for a sanity check. 
+model_orders_predicted = clf.predict(X)
+print(f"Predicted: {model_orders_predicted}")
 
 # SVM predict on Test Data
 model_orders_test_predicted = clf.predict(X_test)
 print(f"Predicted: {model_orders_test_predicted}")
   
 # Evaluate Average training MAPE
+err = mean_absolute_percentage_error(model_orders_observed, model_orders_predicted)
+print(f"Training MAPE is: {err}%")
+
+# Evaluate Average testing MAPE
 err = mean_absolute_percentage_error(model_orders_test_observed, model_orders_test_predicted)
-print(f"Error is: {err}%")
+print(f"Testing MAPE is: {err}%")
 
 # Train ANN:
 # EM simulation results:
