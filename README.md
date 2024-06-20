@@ -35,7 +35,6 @@ Vector Fitting: Obtains the poles and residues of the TF corresponding to the in
    If there are no resonance peaks (very smooth) should check if soln is not well-defined.
    See Gustavsen1999 for more info.
 
-   Vary the # of poles (1 complex is 2 poles) and eval RMS? 
    Also need SVD (of k rows of the a_bar values), then take its S values and make sure none are small (under machine precision limit ~1e-12). 
 
 ### Data Format
