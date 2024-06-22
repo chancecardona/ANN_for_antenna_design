@@ -113,6 +113,45 @@ print(f"Testing SVM MAPE is: {err}%")
 ## O' = {O'_1, K, O'_W}
 
 # Train each branch
+ann = {}
+order_set = set(model_orders_observed + model_orders_test_observed)
+for order in order_set:
+    # MLP has 3 fully connected layers.
+    # Input: 3 neurons, for 3 x values.
+    # 1 row of hidden layers. 
+    model = MLP(len(X[0]), len(Y[0][0]))
+    ann[order] = model
+
+for i in range(len(model_orders_observed)):
+    model_order = model_orders_observed[i]
+    y_pred = ann[model_order](X[i])
+    predicted_S = PoleResidueTF(y_pred, freqs)
+    
+    # Calculate Loss
+    loss = model.loss_fn(output_coeffs, Y_test)
+    loss.backward()
+    optimizer.step()
+    current_loss += loss.item()
+
+    if i%10 == 0:
+        print(f"Loss after mini-batch %5d: %.3f"%(i+1, current_loss/500))
+        current_loss = 0.0
+
+# Filter based on test observation
+# Get order for each sample.
+for i in range(len(model_orders_test_predicted)):
+    model_order = model_orders_test_predicted[i]
+    model = ann[model_order]
+    # Predict
+    output_coeffs = model(X_test[i])
+    predicted_S = PoleResidueTF(output_coeffs, freqs)
+
+    # Calculate Loss
+    loss = model.loss_fn(output_coeffs, Y_test)
+    loss.backward()
+    optimizer.step()
+    current_loss += loss.item()
+
 
 # Only need to train and test the S parameter (S11).
 ## Hecht-Nelson method to determine the node number of the hidden layer: 
