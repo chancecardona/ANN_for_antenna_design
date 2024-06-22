@@ -8,6 +8,8 @@ from sklearn.preprocessing import StandardScaler
 import skrf
 import matplotlib.pyplot as mplt
 
+from models.mlp import *
+
 # Y is the frequency response of S_param. Should have n values of shape [freq, real, imag]
 def vector_fitting(Y : np.ndarray, verbose : bool = True, display : bool = False) -> np.ndarray:
     n_samples = len(Y)
@@ -25,7 +27,7 @@ def vector_fitting(Y : np.ndarray, verbose : bool = True, display : bool = False
         #S_dB = 20*log10(S_11)
         freqs = Y[i][0][:, 0]
     
-        # TODO: is this fine as the S matrix?
+        # TODO: is this fine as the S matrix, just S=s_11?
         ntwk = skrf.Network(frequency=freqs, s=S_11, name="Frequency Response")
         vf = skrf.VectorFitting(ntwk)
         vf.auto_fit()
@@ -44,6 +46,81 @@ def vector_fitting(Y : np.ndarray, verbose : bool = True, display : bool = False
             mplt.show()
           
     return model_orders
+
+def PoleResidueTF(coefficients, freqs):
+    # s is the frequency
+    H = np.zeros(len(freqs))
+    for s in range(len(freqs)):
+        for i in range(len(coefficients)):
+            H[s] += (coefficients[i, 0]) / (freqs[s] - coefficients[i, 1])
+    return H
+
+# X is the geometrical input to the model.
+# Y is the frequency response of S_param predicted by the model. Should have n values of shape [freq, real, imag]
+def train_neural_models(model_orders : np.ndarray, X : np.ndarray, Y : np.ndarray) -> dict:
+    x_dims = len(X[0])
+    y_dims = len(Y[0][0])
+    order_set = set(model_orders)
+    ANNs = {}
+    
+    # SANITY CHECK
+    print(f"Does the lens match: orders: {len(model_orders)}, samples: {len(X)}")
+
+    device = get_device()
+
+    # Allocate relevant items as tensors on the appropriate device (e.g. GPU)
+    tensor_X = torch.tensor(X, device=device)
+
+    # Create an MLP for each order found
+    for order in order_set:
+        model = MLP(x_dims, y_dims).to(device)
+        ANNs[order] = model
+   
+    # Go through each sample, sort by the order (that we got earlier),
+    # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the baseline S-param.
+    for i in range(len(model_orders)):
+        freqs = Y[i][0][:, 0]
+        S_11 = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
+        model_order = model_orders[i]
+        model = ANNs[model_order]
+        optimizer = torch.optim.NAdam(model.parameters(), lr=0.001)
+
+        # Predict S_11 via the ANN
+        pred_tf_coeffs = model(tensor_X[i])
+        pred_S = PoleResidueTF(pred_tf_coeffs, freqs)
+        
+        # Calculate Loss
+        loss = model.loss_fn(Y_test, pred_S)
+        loss.backward()
+        optimizer.step()
+        current_loss += loss.item()
+    
+        if i%10 == 0:
+            print(f"Loss after mini-batch %5d: %.3f"%(i+1, current_loss/500))
+            current_loss = 0.0
+
+    return ANNs
+
+def predict_samples(ANNs : dict, model_orders : np.ndarray, X : np.ndarray, Y : np.ndarray):
+    # Filter based on test observation
+    # Get order for each sample.
+    for i in range(len(model_orders)):
+        freqs = Y[i][0][:, 0]
+        S_11 = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
+        model_order = model_orders[i]
+        model = ANNs[model_order]
+        optimizer = torch.optim.NAdam(model.parameters(), lr=0.001)
+
+        # Predict S_11
+        pred_tf_coeffs = model(X_test[i])
+        pred_S = PoleResidueTF(pred_tf_coeffs, freqs)
+    
+        # Calculate Loss
+        loss = model.loss_fn(Y_test, pred_S)
+        loss.backward()
+        optimizer.step()
+        current_loss += loss.item()
+
 
 # Get current dir
 cur_dir = os.path.dirname(os.path.realpath(__file__))
@@ -91,13 +168,13 @@ model_orders_test_observed = vector_fitting(Y_test)
 
 # SVM predict on Train Data for a sanity check. 
 model_orders_predicted = clf.predict(X)
-print(f"Predicted: {model_orders_predicted}")
+print(f"Train Predicted: {model_orders_predicted}")
 
 # SVM predict on Test Data
 model_orders_test_predicted = clf.predict(X_test)
-print(f"Predicted: {model_orders_test_predicted}")
+print(f"Test Predicted: {model_orders_test_predicted}")
   
-# Evaluate Average training MAPE
+# Evaluate Average training MAPE # TODO: Should this be Chi Squared?
 err = mean_absolute_percentage_error(model_orders_observed, model_orders_predicted)
 print(f"Training SVM MAPE is: {err}%")
 
@@ -112,46 +189,15 @@ print(f"Testing SVM MAPE is: {err}%")
 # Outputs of pole-residue-based transfer function:
 ## O' = {O'_1, K, O'_W}
 
-# Train each branch
-ann = {}
-order_set = set(model_orders_observed + model_orders_test_observed)
-for order in order_set:
-    # MLP has 3 fully connected layers.
-    # Input: 3 neurons, for 3 x values.
-    # 1 row of hidden layers. 
-    model = MLP(len(X[0]), len(Y[0][0]))
-    ann[order] = model
+print(f"Training ANNs now...")
+ANNs = train_neural_models(model_orders_predicted, X, Y)
 
-for i in range(len(model_orders_observed)):
-    model_order = model_orders_observed[i]
-    y_pred = ann[model_order](X[i])
-    predicted_S = PoleResidueTF(y_pred, freqs)
-    
-    # Calculate Loss
-    loss = model.loss_fn(output_coeffs, Y_test)
-    loss.backward()
-    optimizer.step()
-    current_loss += loss.item()
+print(f"Training completed, beginning predictions.")
+predict_samples(ANNs, model_orders_test_predicted, X_test, Y_test)
 
-    if i%10 == 0:
-        print(f"Loss after mini-batch %5d: %.3f"%(i+1, current_loss/500))
-        current_loss = 0.0
-
-# Filter based on test observation
-# Get order for each sample.
-for i in range(len(model_orders_test_predicted)):
-    model_order = model_orders_test_predicted[i]
-    model = ann[model_order]
-    # Predict
-    output_coeffs = model(X_test[i])
-    predicted_S = PoleResidueTF(output_coeffs, freqs)
-
-    # Calculate Loss
-    loss = model.loss_fn(output_coeffs, Y_test)
-    loss.backward()
-    optimizer.step()
-    current_loss += loss.item()
-
+print("Predictions done, saving model.")
+for order,model in ANNs.items():
+    torch.save(model, f"s_param_ann_order_{order}.pkl")
 
 # Only need to train and test the S parameter (S11).
 ## Hecht-Nelson method to determine the node number of the hidden layer: 
