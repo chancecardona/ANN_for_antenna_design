@@ -11,9 +11,12 @@ def get_device():
     return device
 
 class MLP(nn.Module):
-    def __init__(self, input_size, output_size):
+    def __init__(self, input_size, model_order):
         super().__init__()
         hidden_size = (2*input_size + 1)
+        # The model order is the number of real coefficients predicted by the model,
+        # corresponding to poles (first is real, next is complex)
+        output_size = model_order
         self.layers = nn.Sequential(
             # Input layer
             nn.Linear(input_size, hidden_size),
@@ -26,6 +29,7 @@ class MLP(nn.Module):
         )
         # If run into performance issues try converting data instead of model
         self.double()
+        # Model convention is to return: real residues, real poles, complex reisudes, complex poles
 
     def forward(self, x):
         return self.layers(x)

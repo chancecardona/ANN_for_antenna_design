@@ -17,7 +17,8 @@ def vector_fitting(Y : np.ndarray, verbose : bool = True, display : bool = False
     # For each candidate sample, we have W [freq, r, i] S-param values
     print(f"Sanity check, using {n_samples} samples.")
     # Reserve matrix for the model orders for SVM training
-    model_orders = np.zeros(n_samples, dtype=np.uint8)
+    # Reserve a dict for each input sample to its vectorfitting object result.
+    samples_vf = []
     
     for i in range(n_samples):
         print("Starting candidate sample", i)
@@ -31,9 +32,11 @@ def vector_fitting(Y : np.ndarray, verbose : bool = True, display : bool = False
         ntwk = skrf.Network(frequency=freqs, s=S_11, name="Frequency Response")
         vf = skrf.VectorFitting(ntwk)
         vf.auto_fit()
-        model_orders[i] = vf.get_model_order(vf.poles)
+
+        samples_vf.append(vf)
+        model_orders = vf.get_model_order(vf.poles)
         if verbose:
-            print(f'model order for sample {i} = {model_orders[i]}')
+            print(f'model order for sample {i} = {model_orders}')
             print(f'n_poles_real = {np.sum(vf.poles.imag == 0.0)}')
             print(f'n_poles_complex = {np.sum(vf.poles.imag > 0.0)}')
             print(f'RMS Error = {vf.get_rms_error()}')
@@ -45,18 +48,20 @@ def vector_fitting(Y : np.ndarray, verbose : bool = True, display : bool = False
             mplt.tight_layout()
             mplt.show()
           
-    return model_orders
+    return samples_vf
 
 def PoleResidueTF(coefficients, freqs):
     # s is the frequency
     H = np.zeros(len(freqs))
+    # Assume that coefficients = []
     for s in range(len(freqs)):
         for i in range(len(coefficients)):
             H[s] += (coefficients[i, 0]) / (freqs[s] - coefficients[i, 1])
     return H
 
+
 # X is the geometrical input to the model.
-# Y is the frequency response of S_param predicted by the model. Should have n values of shape [freq, real, imag]
+# Y is only used for training after the predicted coefficients are plugged in.
 def train_neural_models(model_orders : np.ndarray, X : np.ndarray, Y : np.ndarray) -> dict:
     x_dims = len(X[0])
     y_dims = len(Y[0][0])
@@ -73,7 +78,7 @@ def train_neural_models(model_orders : np.ndarray, X : np.ndarray, Y : np.ndarra
 
     # Create an MLP for each order found
     for order in order_set:
-        model = MLP(x_dims, y_dims).to(device)
+        model = MLP(x_dims, order).to(device)
         ANNs[order] = model
    
     # Go through each sample, sort by the order (that we got earlier),
@@ -122,104 +127,107 @@ def predict_samples(ANNs : dict, model_orders : np.ndarray, X : np.ndarray, Y : 
         current_loss += loss.item()
 
 
-# Get current dir
-cur_dir = os.path.dirname(os.path.realpath(__file__))
-
-# Load the matlab files
-training_data_path = os.path.join(cur_dir, "Training_Data.mat")
-test_data_path = os.path.join(cur_dir, "Real_Test_Data.mat")
-
-training_data = scipy.io.loadmat(training_data_path)
-test_data = scipy.io.loadmat(test_data_path)
-
-# X = [lp @ ln @ hc]^T (meters)
-# X is of shape (64, 3)
-# Y is S_11 (dB) over the frequency range (GHz) with 3 vals per sample representing: [frequency (GHz), real, imaginary]
-# W is number of points in freq space
-# K is the total number of categories (number of orders of TF's)
-
-X = training_data["candidates"]
-Y = training_data["responses"]
-X_test = test_data["real_test_candidates"]
-Y_test = test_data["real_test_responses"]
-
-# Vector Fitting 
-# Just say the vector fitting results are "observations" for now...
-model_orders_observed = vector_fitting(Y)
-
-# Train SVM:
-# ['linear', 'poly', 'rbf', sigmoid']
-# Need to predict the Order based on the input S-parameter (over frequency space).
-# SVM Input: geometrical variables
-# SVM Output: TF Order (vector fitting on S-param in f-space)
-# SVM Error: Predicted TF Order - Vector Fit TF Order 
-
-print("Training SVM now.")
-# SVC for versatility in parameters, LinearSVC may be preferrable.
-# TODO: one versus one, vs one versus rest (ovo vs ovho)
-# Scale data with the StandardScaler
-svc = svm.SVC(kernel='sigmoid')
-clf = make_pipeline(StandardScaler(), svc)
-clf.fit(X, model_orders_observed)
-
-
-# Classify:
-model_orders_test_observed = vector_fitting(Y_test)
-
-# SVM predict on Train Data for a sanity check. 
-model_orders_predicted = clf.predict(X)
-print(f"Train Predicted: {model_orders_predicted}")
-
-# SVM predict on Test Data
-model_orders_test_predicted = clf.predict(X_test)
-print(f"Test Predicted: {model_orders_test_predicted}")
-  
-# Evaluate Average training MAPE # TODO: Should this be Chi Squared?
-err = mean_absolute_percentage_error(model_orders_observed, model_orders_predicted)
-print(f"Training SVM MAPE is: {err}%")
-
-# Evaluate Average testing MAPE
-err = mean_absolute_percentage_error(model_orders_test_observed, model_orders_test_predicted)
-print(f"Testing SVM MAPE is: {err}%")
-
-# Train ANN:
-# EM simulation results:
-## O = {O_1, K, O_W} , where W is the number of sample points of that frequency.
-
-# Outputs of pole-residue-based transfer function:
-## O' = {O'_1, K, O'_W}
-
-print(f"Training ANNs now...")
-ANNs = train_neural_models(model_orders_predicted, X, Y)
-
-print(f"Training completed, beginning predictions.")
-predict_samples(ANNs, model_orders_test_predicted, X_test, Y_test)
-
-print("Predictions done, saving model.")
-for order,model in ANNs.items():
-    torch.save(model, f"s_param_ann_order_{order}.pkl")
-
-# Only need to train and test the S parameter (S11).
-## Hecht-Nelson method to determine the node number of the hidden layer: 
-##   node number of hidden layer is (2n+1) when input layer is (n).
-
-# input: x (vector of geometrical variables) 
-# output: TF coefficients of S-parameter (this is what we want to train)
-
-# Loss: h(PoleResidueTF(x, freq) - S_response)
-
-# Pole Residue Transfer Function:
-# H(s) = Sigma(r_i / (s - p_i)) from i=1 to Q (Q is the order of the TF)
-# Need to make sure all poles are smooth/continuous for this one.
-# NN 1: Predict poles (p_i) for H(s) (Pole-Residue basaed transfer function)
-# NN 2: Predict residue (r_i) for H(s)
-
-# Rational Based Transfer Function:
-# NN 3: Predict a_i (numerator coeffs) for Rational Transfer Function
-# NN 4: Predict b_i (denominator coeffs) for Rational Transfer Function
-
-
-
-
-### Eventually there will be 3 branches:
-# Branch 2 uses Gain instead of S-Parameter, Branch 3 uses Radiation Pattern (angle) as input to vector fitting prior to classification.
+if __name__ == "__main__":
+    # Get current dir
+    cur_dir = os.path.dirname(os.path.realpath(__file__))
+    
+    # Load the matlab files
+    training_data_path = os.path.join(cur_dir, "Training_Data.mat")
+    test_data_path = os.path.join(cur_dir, "Real_Test_Data.mat")
+    
+    training_data = scipy.io.loadmat(training_data_path)
+    test_data = scipy.io.loadmat(test_data_path)
+    
+    # X = [lp @ ln @ hc]^T (meters)
+    # X is of shape (64, 3)
+    # Y is S_11 (dB) over the frequency range (GHz) with 3 vals per sample representing: [frequency (GHz), real, imaginary]
+    # W is number of points in freq space
+    # K is the total number of categories (number of orders of TF's)
+    
+    X = training_data["candidates"]
+    Y = training_data["responses"]
+    X_test = test_data["real_test_candidates"]
+    Y_test = test_data["real_test_responses"]
+    
+    # Vector Fitting 
+    # Just say the vector fitting results are our "observations" for now.
+    # Return a list of vector fit objects for later use.
+    vf_samples = vector_fitting(Y)
+    model_orders_observed = [vf.get_model_order(vf.poles) for vf in vf_samples]
+    
+    # Train SVM:
+    # ['linear', 'poly', 'rbf', sigmoid']
+    # Need to predict the Order based on the input S-parameter (over frequency space).
+    # SVM Input: geometrical variables
+    # SVM Output: TF Order (vector fitting on S-param in f-space)
+    # SVM Error: Predicted TF Order - Vector Fit TF Order 
+    
+    print("Training SVM now.")
+    # SVC for versatility in parameters, LinearSVC may be preferrable.
+    # TODO: one versus one, vs one versus rest (ovo vs ovho)
+    # Scale data with the StandardScaler
+    svc = svm.SVC(kernel='sigmoid')
+    clf = make_pipeline(StandardScaler(), svc)
+    clf.fit(X, model_orders_observed)
+    
+    
+    # Classify:
+    model_orders_test_observed = vector_fitting(Y_test)
+    
+    # SVM predict on Train Data for a sanity check. 
+    model_orders_predicted = clf.predict(X)
+    print(f"Train Predicted: {model_orders_predicted}")
+    
+    # SVM predict on Test Data
+    model_orders_test_predicted = clf.predict(X_test)
+    print(f"Test Predicted: {model_orders_test_predicted}")
+      
+    # Evaluate Average training MAPE # TODO: Should this be Chi Squared?
+    err = mean_absolute_percentage_error(model_orders_observed, model_orders_predicted)
+    print(f"Training SVM MAPE is: {err}%")
+    
+    # Evaluate Average testing MAPE
+    err = mean_absolute_percentage_error(model_orders_test_observed, model_orders_test_predicted)
+    print(f"Testing SVM MAPE is: {err}%")
+    
+    # Train ANN:
+    # EM simulation results:
+    ## O = {O_1, K, O_W} , where W is the number of sample points of that frequency.
+    
+    # Outputs of pole-residue-based transfer function:
+    ## O' = {O'_1, K, O'_W}
+    
+    print(f"Training ANNs now...")
+    ANNs = train_neural_models(model_orders_predicted, X, Y)
+    
+    print(f"Training completed, beginning predictions.")
+    predict_samples(ANNs, model_orders_test_predicted, X_test, Y_test)
+    
+    print("Predictions done, saving model.")
+    for order,model in ANNs.items():
+        torch.save(model, f"s_param_ann_order_{order}.pkl")
+    
+    # Only need to train and test the S parameter (S11).
+    ## Hecht-Nelson method to determine the node number of the hidden layer: 
+    ##   node number of hidden layer is (2n+1) when input layer is (n).
+    
+    # input: x (vector of geometrical variables) 
+    # output: TF coefficients of S-parameter (this is what we want to train)
+    
+    # Loss: h(PoleResidueTF(x, freq) - S_response)
+    
+    # Pole Residue Transfer Function:
+    # H(s) = Sigma(r_i / (s - p_i)) from i=1 to Q (Q is the order of the TF)
+    # Need to make sure all poles are smooth/continuous for this one.
+    # NN 1: Predict poles (p_i) for H(s) (Pole-Residue basaed transfer function)
+    # NN 2: Predict residue (r_i) for H(s)
+    
+    # Rational Based Transfer Function:
+    # NN 3: Predict a_i (numerator coeffs) for Rational Transfer Function
+    # NN 4: Predict b_i (denominator coeffs) for Rational Transfer Function
+    
+    
+    
+    
+    ### Eventually there will be 3 branches:
+    # Branch 2 uses Gain instead of S-Parameter, Branch 3 uses Radiation Pattern (angle) as input to vector fitting prior to classification.
