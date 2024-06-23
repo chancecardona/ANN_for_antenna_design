@@ -14,9 +14,9 @@ class MLP(nn.Module):
     def __init__(self, input_size, model_order):
         super().__init__()
         hidden_size = (2*input_size + 1)
-        # The model order is the number of real coefficients predicted by the model,
-        # corresponding to poles (first is real, next is complex)
-        output_size = model_order
+        # The output size is 2 times the model order (len of poles) for the residues,
+        # and 2 again since each coeff is a complex value and we expect to return 0im for the real-only components. 
+        output_size = model_order * 2 * 2
         self.layers = nn.Sequential(
             # Input layer
             nn.Linear(input_size, hidden_size),
@@ -32,7 +32,9 @@ class MLP(nn.Module):
         # Model convention is to return: real residues, real poles, complex reisudes, complex poles
 
     def forward(self, x):
-        return self.layers(x)
+        output = self.layers(x)
+        complex_output = torch.view_as_complex(output.view(-1, 2))
+        return complex_output
 
     def loss_fn(self, actual_S, predicted_S):
         return mean_absolute_percentage_error(actual_S, predicted_S)
