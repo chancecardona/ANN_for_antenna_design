@@ -10,12 +10,17 @@ def get_device():
     )
     return device
 
+# Literature (Zhao, Feng, Zhang and Jin's Parametric Modeling of EM Behavior of Microwave... Hybrid-Based Transfer Functions) breaks the NN into 2:
+# NN 1: Predict poles (p_i) for H(s) (Pole-Residue basaed transfer function)
+# NN 2: Predict residue (r_i) for H(s)
+# My approach uses only 1 : NN that predicts residues, then poles, alternating between real and imag. 
+
 # Only predicts S parameter.
 class MLP(nn.Module):
     def __init__(self, input_size, model_order):
         super().__init__()
         # Hecht-Nelson method to determine the node number of the hidden layer: 
-        #   node number of hidden layer is (2n+1) when input layer is (n).
+        # node number of hidden layer is (2n+1) when input layer is (n).
         hidden_size = (2*input_size + 1)
         # The output size is 2 times the model order (len of poles) for the residues,
         # and 2 again since each coeff is a complex value (return 0im if real only). 
@@ -30,7 +35,7 @@ class MLP(nn.Module):
             # Output layer
             nn.Linear(hidden_size, output_size),
         )
-        # If run into performance issues try converting data instead of model
+        # If run into performance issues try converting input data instead of model
         self.double()
 
     # Model convention is to output: residue_i real, residue_i imag, pole_i real, pole_i imag

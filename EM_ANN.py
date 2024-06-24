@@ -54,11 +54,7 @@ def vector_fitting(Y : np.ndarray, verbose : bool = True, display : bool = False
 
 # Pole Residue Transfer Function:
 # H(s) = Sigma(r_i / (s - p_i)) from i=1 to Q (Q is the order of the TF)
-# Need to make sure all poles are smooth/continuous for this one.
-# NN 1: Predict poles (p_i) for H(s) (Pole-Residue basaed transfer function)
-# NN 2: Predict residue (r_i) for H(s)
-# My approach: NN predict residues, then poles in one NN... may be hard to train.
-
+# TODO: Need to make sure all poles are smooth/continuous for this one?
 # Assumes coefficients are all complex data type.
 def PoleResidueTF(coefficients : torch.Tensor, freqs : np.ndarray) -> np.ndarray:
     epsilon = 1e-9
@@ -205,11 +201,9 @@ if __name__ == "__main__":
     training_data = scipy.io.loadmat(training_data_path)
     test_data = scipy.io.loadmat(test_data_path)
     
-    # X = [lp @ ln @ hc]^T (meters)
-    # X is of shape (64, 3)
+    # X = [lp @ ln @ hc]^T (meters), of shape (64, 3) here.
     # Y is S_11 (dB) over the frequency range (GHz) with 3 vals per sample representing: [frequency (GHz), real, imaginary]
     # W is number of points in freq space
-    # K is the total number of categories (number of orders of TF's)
     
     X = training_data["candidates"]
     Y = training_data["responses"]
@@ -261,13 +255,7 @@ if __name__ == "__main__":
     err = mean_absolute_percentage_error(model_orders_test_observed, model_orders_test_predicted)
     print(f"Testing SVM MAPE is: {err}%")
     
-    # Train ANN:
-    # EM simulation results:
-    ## O = {O_1, K, O_W} , where W is the number of sample points of that frequency.
-    
-    # Outputs of pole-residue-based transfer function:
-    ## O' = {O'_1, K, O'_W}
-    
+    ## Train ANN on EM simulation results and Outputs of pole-residue-based transfer function: ##
     print(f"Training ANNs now...")
 
     device = get_device()
@@ -275,16 +263,21 @@ if __name__ == "__main__":
     tensor_X = torch.tensor(X, device=device)
 
     ANNs = create_neural_models(vf_samples, tensor_X, Y)
-    print(f"Pretraining on vector-fit coefficients finished, beginning training data finetuning.")
+    print("Pre-training on vector-fitting coefficients finished. Beginning fine-tuning with training data.")
     train_neural_models(ANNs, model_orders_predicted, tensor_X, Y)
-    
-    print(f"Training completed, beginning predictions.")
-    tensor_X_test = torch.tensor(X, device=device)
-    S_predicted_samples = predict_samples(ANNs, model_orders_test_predicted, tensor_X_test, Y_test)
-
-    print("Predictions done, saving model.")
+    print("Training finished, saving models.")
     for order,model in ANNs.items():
-        torch.save(model, f"s_param_ann_order_{order}.pkl")   
+        torch.save(model, f"model_weights_output/s_param_ann_order_{order}.pkl")   
+    
+    print(f"Now beginning inference.")
+    tensor_X_test = torch.tensor(X, device=device)
+    # Sanity check with Training data
+    S_predicted_samples_train = predict_samples(ANNs, model_orders_predicted, tensor_X, Y)
+    # Test data
+    S_predicted_samples = predict_samples(ANNs, model_orders_test_predicted, tensor_X_test, Y_test)
     
     ### Eventually there will be 3 branches:
-    # Branch 2 uses Gain instead of S-Parameter, Branch 3 uses Radiation Pattern (angle) as input to vector fitting prior to classification.
+    # - S Parameter
+    # - Gain
+    # - Radiation Pattern (angle)
+    # will all be input to vector-fitting for classification.
