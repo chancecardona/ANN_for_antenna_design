@@ -12,6 +12,7 @@ import matplotlib.pyplot as mplt
 import torch
 
 from models.mlp import get_device, MLP
+GHz = 1e9
 
 # Y is the frequency response of S_param. Should have n values of shape [freq, real, imag]
 def vector_fitting(Y : np.ndarray, verbose : bool = True, plot : bool = False) -> np.ndarray:
@@ -26,7 +27,7 @@ def vector_fitting(Y : np.ndarray, verbose : bool = True, plot : bool = False) -
         # Get the complex and real components for each freq sample
         S_11 = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
         #S_dB = 20*log10(S_11)
-        freqs = Y[i][0][:, 0]
+        freqs = Y[i][0][:, 0] * GHz
     
         # TODO: is this fine as the S matrix, just S=s_11?
         ntwk = skrf.Network(frequency=freqs, s=S_11, name=f"frequency_response_{i}")
@@ -57,18 +58,20 @@ def vector_fitting(Y : np.ndarray, verbose : bool = True, plot : bool = False) -
 # Assumes coefficients are all complex data type.
 def PoleResidueTF(coefficients : torch.Tensor, freqs : np.ndarray) -> np.ndarray:
     epsilon = 1e-9
+    device = get_device()
     if len(coefficients) % 2 != 0: 
         print("Coefficients was not even in length meaning poles and residues dif length.")
         exit(1)
     num_poles = len(coefficients) // 2
     # H is freq response
-    H = torch.zeros(len(freqs), dtype=torch.cdouble)
+    H = torch.zeros(len(freqs), dtype=torch.cdouble).to(device)
+    freqs_s = torch.from_numpy(freqs * GHz).to(device)
     # s is the frequency
     for s in range(len(freqs)):
         for i in range(num_poles):
             # Avoid numerical overflow or division by 0
-            denominator = (freqs[s] - coefficients[i+num_poles])
-            if abs(denominator) < epsilon:
+            denominator = (freqs_s[s] - coefficients[i+num_poles])
+            if torch.abs(denominator) < epsilon:
                 denominator += epsilon * (1 if denominator.real >= 0 else -1)
             H[s] += (coefficients[i] / denominator)
     return H
@@ -122,11 +125,12 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
                 print(vf_coeffs)
                 print(pred_tf_coeffs)
                 print("Source", S_samples)
+                print("VF Poles and Residues", vf_series[i].residues)
                 print("VF", vf_S)
                 print("ANN", pred_S.detach().numpy())
-                mplt.plot(freqs, 20*np.log10(abs(S_samples)), 'r-', label="Source (HFSS)")
-                mplt.plot(freqs, 20*np.log10(abs(vf_S)), 'g--', label="Vector Fit")
-                mplt.plot(freqs, 20*np.log10(abs(pred_S.detach().numpy())), 'b-.', label="Predicted (ANN)")
+                mplt.plot(freqs, 20*np.log10(np.abs(S_samples)), 'r-', label="Source (HFSS)")
+                mplt.plot(freqs, 20*np.log10(np.abs(vf_S)), 'g--', label="Vector Fit")
+                mplt.plot(freqs, 20*np.log10(np.abs(pred_S.detach().numpy())), 'b-.', label="Predicted (ANN)")
                 mplt.xlabel("Frequency (GHz)")
                 mplt.ylabel("S_11 (dB)")
                 mplt.legend()
@@ -348,14 +352,14 @@ if __name__ == "__main__":
         print("Plotting Train Data")
         for i in range(len(Y)):
             S_samples_train = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
-            mplt.plot(freqs, 20*np.log10(abs(S_samples_train)), 'r-')
-            mplt.plot(freqs, 20*np.log10(abs(S_predicted_samples_train[i].detach().numpy())), 'b-.')
+            mplt.plot(freqs, 20*np.log10(np.abs(S_samples_train)), 'r-')
+            mplt.plot(freqs, 20*np.log10(np.abs(S_predicted_samples_train[i].detach().numpy())), 'b-.')
             mplt.show()
         print("Plotting Test data")
         for i in range(len(Y_test)):
             S_samples_test = Y_test[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
-            mplt.plot(freqs, 20*np.log10(abs(S_samples_test)), 'r-')
-            mplt.plot(freqs, 20*np.log10(abs(S_predicted_samples_test[i].detach().numpy())), 'b-.')
+            mplt.plot(freqs, 20*np.log10(np.abs(S_samples_test)), 'r-')
+            mplt.plot(freqs, 20*np.log10(np.abs(S_predicted_samples_test[i].detach().numpy())), 'b-.')
             mplt.show()
 
     ### Eventually there will be 3 branches:
