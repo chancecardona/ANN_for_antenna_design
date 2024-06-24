@@ -2,7 +2,59 @@
 
 This is based on the paper [Multiparameter Modeling with ANN for Antenna Design]('./Multiparameter Modeling With ANN for Antenna Design.pdf')  
 
-### Assumptions
+## Environment
+I tested this with Debian 12 (and Ubuntu 22.04) using Python 3.9.
+
+### Installation
+You should also have CUDA installed along with necessary drivers.
+```
+pip3 install -r requirements.txt
+```
+
+## Running
+### Training
+```
+python3 EM_ANN.py --train
+```
+
+### Inference
+If using Git-LFS you should be able to run in inference mode right away.
+```
+python3 EM_ANN.py
+```
+
+## Info
+### Data Format
+There are 2 data files, a training one used in the ANN training process, and a testing one used for ANN validation after training.  
+
+Each matlab data file has 2 rows "candidates", and "responses":
+- candidates: Geometrical Variables. 
+  This should be 3 geometric variables considered during design, such as l_p (patch length), l_a (aperture length), and h_c (cavity height).
+- responses: [Freq, Real(S-Param), Imaginary(S-Param)]
+
+## Results:
+#### SVM MAPE 
+- Training: 0.09344956259018758%
+- Testing SVM MAPE is: 0.08918650793650794%
+#### ANN MAPE
+- Training Average: 1.2962557324024175%
+- Testing Avergae: 1.2560414383900285%
+
+
+#### SVM MAPE (results during parameter selection)
+- Default no scaling (Scikit Linear SVC): 
+  Test: 6.47%
+- Scaled Data: 
+  Test: 4.406%, 4.01%, Train: 5.707%
+  (All data after this is assumed scaled as it helps)
+- RBF Kernel: 
+  Test: 4.406%, Train: 4.76%
+- Sigmoid Kernel: 
+  Test: 3.647%, Train: 4.90%
+- Polynomial Kernel: 
+  Test: 5.656%
+
+### Assumptions and Background
 Electromagnetic band-gap (EBG) structure is a structure that creates a stopband to block electromagnetic waves of certain frequency bands (and heighten sensitivity otherwise) by forming a fine, periodic pattern of small metal patches on dielectric substrates.  
 
 This is using the antenna design contained in the paper, namely an EBG of 77 unit cells arranged in a grid without corners.
@@ -35,27 +87,4 @@ Vector Fitting: Obtains the poles and residues of the TF corresponding to the in
    Typically each (complex) pole corresponds to a resonance peak in the frequency response, so order should at least match that.
    If there are no resonance peaks (very smooth) should check if soln is not well-defined.
    See Gustavsen1999 for more info.
-
    Also need SVD (of k rows of the a_bar values), then take its S values and plot to make sure none are small (under machine precision limit ~1e-12). 
-
-### Data Format
-There are 2 data files, a training one used in the ANN training process, and a testing one used for ANN validation after training.  
-
-Each data file has 2 rows "candidates", and "responses":
-- candidates: Geometrical Variables. 
-  This should be 3 geometric variables considered during design, such as l_p (patch length), l_a (aperture length), and h_c (cavity height).
-- responses: [Freq, Real(S-Param), Imaginary(S-Param)]
-
-### Data Parameter Test Results:
-#### SVM Mape
-- Default no scaling (Scikit Linear SVC): 
-  Test: 6.47%
-- Scaled Data: 
-  Test: 4.406%, 4.01%, Train: 5.707%
-  (All data after this is assumed scaled as it helps)
-- RBF Kernel: 
-  Test: 4.406%, Train: 4.76%
-- Sigmoid Kernel: 
-  Test: 3.647%, Train: 4.90%
-- Polynomial Kernel: 
-  Test: 5.656%

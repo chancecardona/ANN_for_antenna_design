@@ -163,7 +163,7 @@ def train_neural_models(ANNs : dict, model_orders : np.ndarray, tensor_X : torch
     for model_order,model in ANNs.items():
         model.eval() 
 
-def predict_samples(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Tensor, Y : np.ndarray) -> list:
+def predict_samples(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Tensor, Y : np.ndarray) -> tuple[list, float]:
     device = get_device()
     # Filter based on test observation
     # Get order for each sample.
@@ -183,11 +183,10 @@ def predict_samples(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Ten
         # Calculate Loss
         loss = model.loss_fn(S_11, pred_S)
         S_predicted_loss_avg += loss.item()
-        if i%10 ==0:
+        if i%10 == 0:
             print(f"Loss of prediction {i}: {loss.item()}")
     S_predicted_loss_avg /= len(model_orders)
-    print("Average testing MAPE:", S_predicted_loss_avg)
-    return S_predicted_samples
+    return S_predicted_samples, S_predicted_loss_avg
 
 
 if __name__ == "__main__":
@@ -320,9 +319,11 @@ if __name__ == "__main__":
 
     print(f"Now beginning inference.")
     # Sanity check with Training data
-    S_predicted_samples_train = predict_samples(ANNs, model_orders_predicted, tensor_X, Y)
+    S_predicted_samples_train, train_loss_avg = predict_samples(ANNs, model_orders_predicted, tensor_X, Y)
+    print("Average training MAPE:", train_loss_avg)
     # Test data
-    S_predicted_samples = predict_samples(ANNs, model_orders_test_predicted, tensor_X_test, Y_test)
+    S_predicted_samples, test_loss_avg = predict_samples(ANNs, model_orders_test_predicted, tensor_X_test, Y_test)
+    print("Average training MAPE:", test_loss_avg)
     
     ### Eventually there will be 3 branches:
     # - S Parameter
