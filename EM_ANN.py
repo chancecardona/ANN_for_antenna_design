@@ -168,16 +168,17 @@ def train_neural_models(ANNs : dict, model_orders : np.ndarray, tensor_X : torch
     for model_order,model in ANNs.items():
         model.eval() 
 
-def predict_samples(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Tensor, Y : np.ndarray):
+def predict_samples(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Tensor, Y : np.ndarray) -> list:
     device = get_device()
     # Filter based on test observation
     # Get order for each sample.
+    S_predicted_samples = []
+    S_predicted_loss_avg = 0.0
     for i in range(len(model_orders)):
         freqs = Y[i][0][:, 0]
         S_11 = torch.from_numpy(Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)).to(device)
         model_order = model_orders[i]
         model = ANNs[model_order]
-        optimizer = torch.optim.NAdam(model.parameters(), lr=0.001)
 
         # Predict S_11
         pred_tf_coeffs = model(tensor_X[i])
@@ -185,9 +186,12 @@ def predict_samples(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Ten
     
         # Calculate Loss
         loss = model.loss_fn(S_11, pred_S)
-        loss.backward()
-        optimizer.step()
-        current_loss += loss.item()
+        S_predicted_loss_avg += loss.item()
+        print(f"Loss of prediction: {loss.item()}")
+        S_predicted_samples.append(pred_S)
+    S_predicted_loss_avg /= len(model_orders)
+    print("Average testing MAPE:", S_predicted_loss_avg)
+    return S_predicted_samples
 
 
 if __name__ == "__main__":
@@ -276,11 +280,11 @@ if __name__ == "__main__":
     
     print(f"Training completed, beginning predictions.")
     tensor_X_test = torch.tensor(X, device=device)
-    predict_samples(ANNs, model_orders_test_predicted, tensor_X_test, Y_test)
-    
+    S_predicted_samples = predict_samples(ANNs, model_orders_test_predicted, tensor_X_test, Y_test)
+
     print("Predictions done, saving model.")
     for order,model in ANNs.items():
-        torch.save(model, f"s_param_ann_order_{order}.pkl")  
+        torch.save(model, f"s_param_ann_order_{order}.pkl")   
     
     ### Eventually there will be 3 branches:
     # Branch 2 uses Gain instead of S-Parameter, Branch 3 uses Radiation Pattern (angle) as input to vector fitting prior to classification.
