@@ -2,13 +2,14 @@ import os
 import numpy as np
 import scipy.io # Read Matlab files
 from sklearn import svm # SVM
-from sklearn.metrics import mean_absolute_percentage_error
+from sklearn.metrics import mean_absolute_percentage_error # Using SKlearn's MAPE for np
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 import skrf
 import matplotlib.pyplot as mplt
+import torch
 
-from models.mlp import *
+from models.mlp import get_device, MLP
 
 # Y is the frequency response of S_param. Should have n values of shape [freq, real, imag]
 def vector_fitting(Y : np.ndarray, verbose : bool = True, display : bool = False) -> np.ndarray:
@@ -50,28 +51,41 @@ def vector_fitting(Y : np.ndarray, verbose : bool = True, display : bool = False
           
     return samples_vf
 
+
+# Pole Residue Transfer Function:
+# H(s) = Sigma(r_i / (s - p_i)) from i=1 to Q (Q is the order of the TF)
+# Need to make sure all poles are smooth/continuous for this one.
+# NN 1: Predict poles (p_i) for H(s) (Pole-Residue basaed transfer function)
+# NN 2: Predict residue (r_i) for H(s)
+# My approach: NN predict residues, then poles in one NN... may be hard to train.
+
 # Assumes coefficients are all complex data type.
-def PoleResidueTF(coefficients : np.ndarray, freqs : np.ndarray) -> np.ndarray:
+def PoleResidueTF(coefficients : torch.Tensor, freqs : np.ndarray) -> np.ndarray:
     epsilon = 1e-9
     if len(coefficients) % 2 != 0: 
         print("Coefficients was not even in length meaning poles and residues dif length.")
         exit(1)
     num_poles = len(coefficients) // 2
     # H is freq response
-    H = np.zeros(len(freqs))
+    H = torch.zeros(len(freqs), dtype=torch.cdouble)
     # s is the frequency
-    import pdb; pdb.set_trace()
+    #TODO import pdb; pdb.set_trace()
     for s in range(len(freqs)):
         for i in range(num_poles):
+            # Avoid numerical overflow or division by 0
             denominator = (freqs[s] - coefficients[i+num_poles])
             if abs(denominator) < epsilon:
-                denominator += epsilon
+                denominator += epsilon * (1 if denominator.real >= 0 else -1)
             H[s] += (coefficients[i] / denominator)
     return H
 
+# (Not Implemented) Rational Based Transfer Function:
+# NN 3: Predict a_i (numerator coeffs) for Rational Transfer Function
+# NN 4: Predict b_i (denominator coeffs) for Rational Transfer Function 
+
 # Only need Y for the freqs
-def create_neural_models(vf_series : list, tensor_X : np.ndarray, Y : np.ndarray) -> dict:
-    x_dims = len(X[0])
+def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarray) -> dict:
+    x_dims = len(tensor_X[0])
     # This assumes the model order is actually the length of the poles array, and sorts
     # according to that rather than the actual TF order since that corresponds to neuron layers
     # to enable treating real and complex coefficients the same.
@@ -90,65 +104,77 @@ def create_neural_models(vf_series : list, tensor_X : np.ndarray, Y : np.ndarray
  
     # Go through each sample, sort by the order (that we got earlier),
     # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the vector fit coeffs fed through the TF.
-    for i in range(len(X)):
-        freqs = Y[i][0][:, 0] # TODO Only need Y for the freqs here
-        # Ordering of coeffs is: (real residues, 
-        model_order = model_orders[i]
-        model = ANNs[model_order]
-        optimizer = torch.optim.NAdam(model.parameters(), lr=0.001)
-       
-        # Predict S_11 via the vector fit coeffs (all residues first, then all poles)
-        vf_coeffs = np.concatenate((vf_series[i].residues[0], vf_series[i].poles))
-        vf_S = PoleResidueTF(vf_coeffs, freqs)
+    epochs = 1
+    for epoch in range(0,epochs):
+        print(f"Starting Epoch {epoch}")
+        current_loss = 0.0
+        for i in range(len(tensor_X)):
+            freqs = Y[i][0][:, 0] # TODO Only need Y for the freqs here
+            model_order = model_orders[i]
+            model = ANNs[model_order]
+            optimizer = torch.optim.NAdam(model.parameters(), lr=0.001)
+           
+            # Predict S_11 via the vector fit coeffs (all residues first, then all poles)
+            vf_coeffs = torch.from_numpy(np.concatenate((vf_series[i].residues[0], vf_series[i].poles))).to(device)
+            vf_S = PoleResidueTF(vf_coeffs, freqs)
 
-        # Predict S_11 via the ANN
-        pred_tf_coeffs = model(tensor_X[i])
-        pred_S = PoleResidueTF(pred_tf_coeffs, freqs)
+            # Predict S_11 via the ANN
+            pred_tf_coeffs = model(tensor_X[i])
+            pred_S = PoleResidueTF(pred_tf_coeffs, freqs)
+            
+            # Calculate Loss
+            loss = model.loss_fn(vf_S, pred_S)
+            loss.backward()
+            optimizer.step()
+            current_loss += loss.item()
         
-        # Calculate Loss
-        loss = model.loss_fn(vf_S, pred_S)
-        loss.backward()
-        optimizer.step()
-        current_loss += loss.item()
-    
-        if i%10 == 0:
-            print(f"Loss after mini-batch %5d: %.3f"%(i+1, current_loss/500))
-            current_loss = 0.0
+            if i%10 == 0:
+                print(f"Loss after mini-batch for model order {model_order} %5d: %.3f"%(i+1, current_loss/500))
+                current_loss = 0.0
 
     return ANNs
 
 # X is the geometrical input to the model.
 # Y is only used for training after the predicted coefficients are plugged in.
-def train_neural_models(ANNs : dict, model_orders : np.ndarray, tensor_X : np.ndarray, Y : np.ndarray) -> dict:
+def train_neural_models(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Tensor, Y : np.ndarray):
+    device = get_device()
     # Go through each sample, sort by the order (that we got earlier),
     # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the baseline S-param.
-    for i in range(len(model_orders)):
-        freqs = Y[i][0][:, 0]
-        S_11 = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
-        model_order = model_orders[i]
-        model = ANNs[model_order]
-        optimizer = torch.optim.NAdam(model.parameters(), lr=0.001)
+    epochs = 1
+    for epoch in range(0,epochs):
+        current_loss = 0.0
+        for i in range(len(tensor_X)):
+            freqs = Y[i][0][:, 0]
+            S_11 = torch.from_numpy(Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)).to(device)
+            model_order = model_orders[i]
+            model = ANNs[model_order]
+            optimizer = torch.optim.NAdam(model.parameters(), lr=0.001)
 
-        # Predict S_11 via the ANN
-        pred_tf_coeffs = model(tensor_X[i])
-        pred_S = PoleResidueTF(pred_tf_coeffs, freqs)
+            # Predict S_11 via the ANN
+            pred_tf_coeffs = model(tensor_X[i])
+            pred_S = PoleResidueTF(pred_tf_coeffs, freqs)
+            
+            # Calculate Loss
+            loss = model.loss_fn(S_11, pred_S)
+            loss.backward()
+            optimizer.step()
+            current_loss += loss.item()
         
-        # Calculate Loss
-        loss = model.loss_fn(S_11, pred_S)
-        loss.backward()
-        optimizer.step()
-        current_loss += loss.item()
-    
-        if i%10 == 0:
-            print(f"Loss after mini-batch %5d: %.3f"%(i+1, current_loss/500))
-            current_loss = 0.0
+            if i%10 == 0:
+                print(f"Loss after mini-batch for model order {model_order} %5d: %.3f"%(i+1, current_loss/500))
+                current_loss = 0.0
 
-def predict_samples(ANNs : dict, model_orders : np.ndarray, tensor_X : np.ndarray, Y : np.ndarray):
+    # Set models to eval mode now for inference. Set back to train if training more.
+    for model_order,model in ANNs.items():
+        model.eval() 
+
+def predict_samples(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Tensor, Y : np.ndarray):
+    device = get_device()
     # Filter based on test observation
     # Get order for each sample.
     for i in range(len(model_orders)):
         freqs = Y[i][0][:, 0]
-        S_11 = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
+        S_11 = torch.from_numpy(Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)).to(device)
         model_order = model_orders[i]
         model = ANNs[model_order]
         optimizer = torch.optim.NAdam(model.parameters(), lr=0.001)
@@ -244,7 +270,7 @@ if __name__ == "__main__":
     # Allocate relevant items as tensors on the appropriate device (e.g. GPU)
     tensor_X = torch.tensor(X, device=device)
 
-    ANNs, model_orders = create_neural_models(vf_samples, tensor_X, Y)
+    ANNs = create_neural_models(vf_samples, tensor_X, Y)
     print(f"Pretraining on vector-fit coefficients finished, beginning training data finetuning.")
     train_neural_models(ANNs, model_orders_predicted, tensor_X, Y)
     
@@ -254,29 +280,7 @@ if __name__ == "__main__":
     
     print("Predictions done, saving model.")
     for order,model in ANNs.items():
-        torch.save(model, f"s_param_ann_order_{order}.pkl")
-    
-    # Only need to train and test the S parameter (S11).
-    ## Hecht-Nelson method to determine the node number of the hidden layer: 
-    ##   node number of hidden layer is (2n+1) when input layer is (n).
-    
-    # input: x (vector of geometrical variables) 
-    # output: TF coefficients of S-parameter (this is what we want to train)
-    
-    # Loss: h(PoleResidueTF(x, freq) - S_response)
-    
-    # Pole Residue Transfer Function:
-    # H(s) = Sigma(r_i / (s - p_i)) from i=1 to Q (Q is the order of the TF)
-    # Need to make sure all poles are smooth/continuous for this one.
-    # NN 1: Predict poles (p_i) for H(s) (Pole-Residue basaed transfer function)
-    # NN 2: Predict residue (r_i) for H(s)
-    
-    # Rational Based Transfer Function:
-    # NN 3: Predict a_i (numerator coeffs) for Rational Transfer Function
-    # NN 4: Predict b_i (denominator coeffs) for Rational Transfer Function
-    
-    
-    
+        torch.save(model, f"s_param_ann_order_{order}.pkl")  
     
     ### Eventually there will be 3 branches:
     # Branch 2 uses Gain instead of S-Parameter, Branch 3 uses Radiation Pattern (angle) as input to vector fitting prior to classification.
