@@ -14,7 +14,7 @@ import torch
 from models.mlp import get_device, MLP
 
 # Y is the frequency response of S_param. Should have n values of shape [freq, real, imag]
-def vector_fitting(Y : np.ndarray, verbose : bool = True, display : bool = False) -> np.ndarray:
+def vector_fitting(Y : np.ndarray, verbose : bool = True, plot : bool = False) -> np.ndarray:
     n_samples = len(Y)
     W = len(Y[0][0])
     # For each candidate sample, we have W [freq, r, i] S-param values
@@ -40,7 +40,7 @@ def vector_fitting(Y : np.ndarray, verbose : bool = True, display : bool = False
             print(f'n_poles_real = {np.sum(vf.poles.imag == 0.0)}')
             print(f'n_poles_complex = {np.sum(vf.poles.imag > 0.0)}')
             print(f'RMS Error = {vf.get_rms_error()}')
-        if display: 
+        if plot: 
             fig, ax = mplt.subplots(2, 1)
             fig.set_size_inches(6, 8)
             vf.plot_convergence(ax=ax[0]) 
@@ -64,7 +64,6 @@ def PoleResidueTF(coefficients : torch.Tensor, freqs : np.ndarray) -> np.ndarray
     # H is freq response
     H = torch.zeros(len(freqs), dtype=torch.cdouble)
     # s is the frequency
-    #TODO import pdb; pdb.set_trace()
     for s in range(len(freqs)):
         for i in range(num_poles):
             # Avoid numerical overflow or division by 0
@@ -79,7 +78,7 @@ def PoleResidueTF(coefficients : torch.Tensor, freqs : np.ndarray) -> np.ndarray
 # NN 4: Predict b_i (denominator coeffs) for Rational Transfer Function 
 
 # Only need Y for the freqs
-def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarray) -> dict:
+def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarray, plot : bool = False) -> dict:
     x_dims = len(tensor_X[0])
     # This assumes the model order is actually the length of the poles array, and sorts
     # according to that rather than the actual TF order since that corresponds to neuron layers
@@ -103,8 +102,8 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
     for epoch in range(0,epochs):
         print(f"Starting Epoch {epoch}")
         current_loss = 0.0
+        freqs = Y[0][0][:, 0] # TODO Only need Y because of the freqs here
         for i in range(len(tensor_X)):
-            freqs = Y[i][0][:, 0] # TODO Only need Y for the freqs here
             model_order = model_orders[i]
             model = ANNs[model_order]
             optimizer = torch.optim.NAdam(model.parameters(), lr=0.001)
@@ -116,6 +115,22 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
             # Predict S_11 via the ANN
             pred_tf_coeffs = model(tensor_X[i])
             pred_S = PoleResidueTF(pred_tf_coeffs, freqs)
+       
+            if plot:
+                S_samples = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
+                print("Candidates:")
+                print(vf_coeffs)
+                print(pred_tf_coeffs)
+                print("Source", S_samples)
+                print("VF", vf_S)
+                print("ANN", pred_S.detach().numpy())
+                mplt.plot(freqs, 20*np.log10(abs(S_samples)), 'r-', label="Source (HFSS)")
+                mplt.plot(freqs, 20*np.log10(abs(vf_S)), 'g--', label="Vector Fit")
+                mplt.plot(freqs, 20*np.log10(abs(pred_S.detach().numpy())), 'b-.', label="Predicted (ANN)")
+                mplt.xlabel("Frequency (GHz)")
+                mplt.ylabel("S_11 (dB)")
+                mplt.legend()
+                mplt.show()
             
             # Calculate Loss
             loss = model.loss_fn(vf_S, pred_S)
@@ -192,6 +207,7 @@ def predict_samples(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Ten
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Trains or evaluates an ANN to predict the S_11 freq response using .mat files")
     parser.add_argument("--train", action="store_true", help="Train ANNs from the matlab data files. (else will load files if present).")
+    parser.add_argument("--plot", action="store_true", help="Plot data samples with matplotlib.")
     args = parser.parse_args()
 
     # Get current dir
@@ -222,9 +238,9 @@ if __name__ == "__main__":
         # Vector Fitting 
         # Just say the vector fitting results are our "observations" for now.
         # Return a list of vector-fitting objects that have been fit for later use.
-        vf_samples = vector_fitting(Y)
+        vf_samples = vector_fitting(Y)#, plot=args.plot)
         # Classify the testing data here too for later.
-        vf_samples_test = vector_fitting(Y_test)
+        vf_samples_test = vector_fitting(Y_test)#, plot=args.plot)
 
         #print("Vector fitting finished, saving to file")
         #for vf in vf_samples:
@@ -275,7 +291,7 @@ if __name__ == "__main__":
         ## Train ANN on EM simulation results and Outputs of pole-residue-based transfer function: ##
         print(f"Training ANNs now...")
 
-        ANNs = create_neural_models(vf_samples, tensor_X, Y)
+        ANNs = create_neural_models(vf_samples, tensor_X, Y, plot=args.plot)
         print("Pre-training on vector-fitting coefficients finished. Beginning fine-tuning with training data.")
         train_neural_models(ANNs, model_orders_predicted, tensor_X, Y)
 
@@ -321,10 +337,27 @@ if __name__ == "__main__":
     # Sanity check with Training data
     S_predicted_samples_train, train_loss_avg = predict_samples(ANNs, model_orders_predicted, tensor_X, Y)
     print("Average training MAPE:", train_loss_avg)
+
     # Test data
-    S_predicted_samples, test_loss_avg = predict_samples(ANNs, model_orders_test_predicted, tensor_X_test, Y_test)
+    S_predicted_samples_test, test_loss_avg = predict_samples(ANNs, model_orders_test_predicted, tensor_X_test, Y_test)
     print("Average training MAPE:", test_loss_avg)
-    
+   
+    # Plot neural net predictions
+    if args.plot:
+        freqs = Y[0][0][:, 0]
+        print("Plotting Train Data")
+        for i in range(len(Y)):
+            S_samples_train = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
+            mplt.plot(freqs, 20*np.log10(abs(S_samples_train)), 'r-')
+            mplt.plot(freqs, 20*np.log10(abs(S_predicted_samples_train[i].detach().numpy())), 'b-.')
+            mplt.show()
+        print("Plotting Test data")
+        for i in range(len(Y_test)):
+            S_samples_test = Y_test[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
+            mplt.plot(freqs, 20*np.log10(abs(S_samples_test)), 'r-')
+            mplt.plot(freqs, 20*np.log10(abs(S_predicted_samples_test[i].detach().numpy())), 'b-.')
+            mplt.show()
+
     ### Eventually there will be 3 branches:
     # - S Parameter
     # - Gain
