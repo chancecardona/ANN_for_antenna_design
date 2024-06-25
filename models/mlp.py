@@ -22,10 +22,19 @@ class MLP(nn.Module):
         # Hecht-Nelson method to determine the node number of the hidden layer: 
         # node number of hidden layer is (2n+1) when input layer is (n).
         hidden_size = (2*input_size + 1)
-        # The output size is 2 times the model order (len of poles) for the residues,
-        # and 2 again since each coeff is a complex value (return 0im if real only). 
-        output_size = model_order * 2 * 2
-        self.layers = nn.Sequential(
+        # The output size is 2 times the model order (len of poles) since each coeff is a complex value (return 0im if real only). 
+        output_size = model_order * 2
+        self.p_layers = nn.Sequential(
+            # Input layer
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            # First hidden layer (Fully Connected)
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            # Output layer
+            nn.Linear(hidden_size, output_size),
+        )
+        self.r_layers = nn.Sequential(
             # Input layer
             nn.Linear(input_size, hidden_size),
             nn.ReLU(),
@@ -39,13 +48,20 @@ class MLP(nn.Module):
         self.double()
 
     # Model convention is to output: residue_i real, residue_i imag, pole_i real, pole_i imag
-    # This converts that into complex residues followed by the complex poles.
+    # This converts that into complex poles and then residues
     def forward(self, x):
-        output = self.layers(x)
-        complex_output = torch.view_as_complex(output.view(-1, 2))
-        return complex_output
+        complex_p = torch.view_as_complex(self.p_layers(x).view(-1, 2))
+        complex_r = torch.view_as_complex(self.r_layers(x).view(-1, 2))
+        output = torch.cat((complex_p, complex_r), dim=0)
+        return output
 
     def loss_fn(self, actual_S, predicted_S):
+        # Take complex conjugate to do square
+        c = predicted_S - actual_S
+        return torch.abs(torch.sum(c * torch.conj(c)) / 2)
+
+    # Used for model evaluation
+    def error_mape(self, actual_S, predicted_S):
         # S is complex, but MAPE isn't. Do average of r and i parts.
         real_MAPE = mean_absolute_percentage_error(actual_S.real, predicted_S.real)
         imag_MAPE = mean_absolute_percentage_error(actual_S.imag, predicted_S.imag)

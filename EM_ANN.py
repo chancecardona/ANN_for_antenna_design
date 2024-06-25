@@ -55,21 +55,17 @@ def vector_fitting(Y : np.ndarray, verbose : bool = True, plot : bool = False) -
 # H(s) = Sigma(r_i / (s - p_i)) from i=1 to Q (Q is the order of the TF)
 # TODO: Need to make sure all poles are smooth/continuous for this one?
 # Assumes coefficients are all complex data type.
-def PoleResidueTF(coefficients : torch.Tensor, freqs : np.ndarray) -> np.ndarray:
+def PoleResidueTF(poles : torch.Tensor, residues : torch.Tensor, freqs : np.ndarray) -> np.ndarray:
     epsilon = 1e-9
     device = get_device()
-    if len(coefficients) % 2 != 0: 
-        print("Coefficients was not even in length meaning poles and residues dif length.")
-        exit(1)
-    num_poles = len(coefficients) // 2
     # H is freq response
     H = torch.zeros(len(freqs), dtype=torch.cdouble).to(device)
     s = torch.from_numpy(2j*np.pi * freqs).to(device)
     # s is the frequency
     for j in range(len(s)):
-        for i in range(num_poles):
-            r = coefficients[i]
-            p = coefficients[i+num_poles]
+        for i in range(len(poles)):
+            p = poles[i]
+            r = residues[i]
             #if torch.abs(denominator) < epsilon:
             #   denominator += epsilon * (1 if denominator.real >= 0 else -1)
             if torch.imag(p) == 0:
@@ -114,12 +110,15 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
             optimizer = torch.optim.NAdam(model.parameters(), lr=0.001)
            
             # Predict S_11 via the vector fit coeffs (all residues first, then all poles)
-            vf_coeffs = torch.from_numpy(np.concatenate((vf_series[i].residues[0], vf_series[i].poles))).to(device)
-            vf_S = PoleResidueTF(vf_coeffs, freqs)
+            vf_poles = torch.from_numpy(vf_series[i].poles).to(device)
+            vf_residues = torch.from_numpy(vf_series[i].residues[0]).to(device)
+            vf_S = PoleResidueTF(vf_poles, vf_residues, freqs)
 
             # Predict S_11 via the ANN
-            pred_tf_coeffs = model(tensor_X[i])
-            pred_S = PoleResidueTF(pred_tf_coeffs, freqs)
+            pred_coeffs = model(tensor_X[i])
+            pred_poles = pred_coeffs[0:model_order]
+            pred_residues = pred_coeffs[model_order:]
+            pred_S = PoleResidueTF(pred_poles, pred_residues, freqs)
        
             if plot:
                 S_samples = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
@@ -128,7 +127,8 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
                 print(f"VF RMS error {vf_series[i].get_rms_error()}")
                 print("VF Poles", vf_series[i].poles)
                 print("VF Residues", vf_series[i].residues)
-                print("ANN", pred_tf_coeffs.detach().numpy())
+                print("ANN Poles", pred_poles.detach().numpy())
+                print("ANN Residues", pred_residues.detach().numpy())
                 #print("Source", S_samples)
                 #print("VF", vf_S)
                 #print("ANN", pred_S.detach().numpy())
@@ -163,19 +163,24 @@ def train_neural_models(ANNs : dict, model_orders : np.ndarray, tensor_X : torch
     device = get_device()
     # Go through each sample, sort by the order (that we got earlier),
     # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the baseline S-param.
-    epochs = 1
+    epochs = 2
     for epoch in range(0,epochs):
+        print(f"Starting Epoch {epoch}")
         current_loss = 0.0
         for i in range(len(tensor_X)):
             freqs = Y[i][0][:, 0]
-            S_11 = torch.from_numpy(Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)).to(device)
             model_order = model_orders[i]
             model = ANNs[model_order]
             optimizer = torch.optim.NAdam(model.parameters(), lr=0.001)
+            
+            # Get ground truth data from Y
+            S_11 = torch.from_numpy(Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)).to(device)
 
             # Predict S_11 via the ANN
-            pred_tf_coeffs = model(tensor_X[i])
-            pred_S = PoleResidueTF(pred_tf_coeffs, freqs)
+            pred_coeffs = model(tensor_X[i])
+            pred_poles = pred_coeffs[0:model_order]
+            pred_residues = pred_coeffs[model_order:]
+            pred_S = PoleResidueTF(pred_poles, pred_residues, freqs)
             
             # Calculate Loss
             loss = model.loss_fn(S_11, pred_S)
@@ -196,7 +201,7 @@ def predict_samples(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Ten
     # Filter based on test observation
     # Get order for each sample.
     S_predicted_samples = []
-    S_predicted_loss_avg = 0.0
+    S_predicted_mape_avg = 0.0
     for i in range(len(model_orders)):
         freqs = Y[i][0][:, 0]
         S_11 = torch.from_numpy(Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)).to(device)
@@ -204,17 +209,19 @@ def predict_samples(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Ten
         model = ANNs[model_order]
 
         # Predict S_11
-        pred_tf_coeffs = model(tensor_X[i])
-        pred_S = PoleResidueTF(pred_tf_coeffs, freqs)
+        pred_coeffs = model(tensor_X[i])
+        pred_poles = pred_coeffs[0:model_order]
+        pred_residues = pred_coeffs[model_order:]
+        pred_S = PoleResidueTF(pred_poles, pred_residues, freqs)
         S_predicted_samples.append(pred_S)
     
         # Calculate Loss
         loss = model.loss_fn(S_11, pred_S)
-        S_predicted_loss_avg += loss.item()
+        S_predicted_mape_avg += model.error_mape(S_11, pred_S).item()
         if i%10 == 0:
             print(f"Loss of prediction {i}: {loss.item()}")
-    S_predicted_loss_avg /= len(model_orders)
-    return S_predicted_samples, S_predicted_loss_avg
+    S_predicted_mape_avg /= len(model_orders)
+    return S_predicted_samples, S_predicted_mape_avg
 
 
 if __name__ == "__main__":
@@ -310,7 +317,7 @@ if __name__ == "__main__":
 
         print("Training finished, saving models.")
         for order,model in ANNs.items():
-            torch.save(model, f"model_weights_output/s_param_ann_order_{order}.pkl")   
+            torch.save(model, f"model_weights_output/s_param_ann_order_{order}.pkl")
     else: 
         # Else load pre trained models.
         print("Initializing testing environment. Loading weights files.")
@@ -343,8 +350,9 @@ if __name__ == "__main__":
         
         ANNs = {}
         for order in set(np.concatenate([model_orders_predicted, model_orders_test_predicted])):
-            model = torch.load(f"model_weights_output/s_param_ann_order_{order}.pkl")    
-            ANNs[order] = model 
+            model = torch.load(f"model_weights_output/s_param_ann_order_{order}_p.pkl")
+            model = torch.load(f"model_weights_output/s_param_ann_order_{order}_r.pkl")
+            ANNs[order] = model
 
     print(f"Now beginning inference.")
     # Sanity check with Training data
