@@ -26,10 +26,9 @@ def vector_fitting(Y : np.ndarray, verbose : bool = True, plot : bool = False) -
         print("Starting candidate sample", i)
         # Get the complex and real components for each freq sample
         S_11 = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
-        #S_dB = 20*log10(S_11)
-        freqs = Y[i][0][:, 0] * GHz
+        freqs = Y[i][0][:, 0]
     
-        # TODO: is this fine as the S matrix, just S=s_11?
+        # Assuming S=s_11
         ntwk = skrf.Network(frequency=freqs, s=S_11, name=f"frequency_response_{i}")
         vf = skrf.VectorFitting(ntwk)
         vf.auto_fit()
@@ -65,15 +64,18 @@ def PoleResidueTF(coefficients : torch.Tensor, freqs : np.ndarray) -> np.ndarray
     num_poles = len(coefficients) // 2
     # H is freq response
     H = torch.zeros(len(freqs), dtype=torch.cdouble).to(device)
-    freqs_s = torch.from_numpy(freqs * GHz).to(device)
+    s = torch.from_numpy(2j*np.pi * freqs).to(device)
     # s is the frequency
-    for s in range(len(freqs)):
+    for j in range(len(s)):
         for i in range(num_poles):
-            # Avoid numerical overflow or division by 0
-            denominator = (freqs_s[s] - coefficients[i+num_poles])
-            if torch.abs(denominator) < epsilon:
-                denominator += epsilon * (1 if denominator.real >= 0 else -1)
-            H[s] += (coefficients[i] / denominator)
+            r = coefficients[i]
+            p = coefficients[i+num_poles]
+            #if torch.abs(denominator) < epsilon:
+            #   denominator += epsilon * (1 if denominator.real >= 0 else -1)
+            if torch.imag(p) == 0:
+                H[j] += r / (s[j] - p)
+            else:
+                H[j] += r / (s[j] - p) + torch.conj(r) / (s[j] - torch.conj(p))
     return H
 
 # (Not Implemented) Rational Based Transfer Function:
@@ -105,7 +107,7 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
     for epoch in range(0,epochs):
         print(f"Starting Epoch {epoch}")
         current_loss = 0.0
-        freqs = Y[0][0][:, 0] # TODO Only need Y because of the freqs here
+        freqs = Y[0][0][:, 0] 
         for i in range(len(tensor_X)):
             model_order = model_orders[i]
             model = ANNs[model_order]
@@ -121,19 +123,26 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
        
             if plot:
                 S_samples = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
-                print("Candidates:")
-                print(vf_coeffs)
                 print(pred_tf_coeffs)
-                print("Source", S_samples)
-                print("VF Poles and Residues", vf_series[i].residues)
-                print("VF", vf_S)
-                print("ANN", pred_S.detach().numpy())
-                mplt.plot(freqs, 20*np.log10(np.abs(S_samples)), 'r-', label="Source (HFSS)")
-                mplt.plot(freqs, 20*np.log10(np.abs(vf_S)), 'g--', label="Vector Fit")
-                mplt.plot(freqs, 20*np.log10(np.abs(pred_S.detach().numpy())), 'b-.', label="Predicted (ANN)")
-                mplt.xlabel("Frequency (GHz)")
-                mplt.ylabel("S_11 (dB)")
-                mplt.legend()
+                print(f"SAMPLE {i} of ORDER {model_order}") 
+                print(f"VF RMS error {vf_series[i].get_rms_error()}")
+                print("VF Poles", vf_series[i].poles)
+                print("VF Residues", vf_series[i].residues)
+                print("ANN", pred_tf_coeffs.detach().numpy())
+                #print("Source", S_samples)
+                #print("VF", vf_S)
+                #print("ANN", pred_S.detach().numpy())
+                fig, ax = mplt.subplots(2, 1)
+                fig.set_size_inches(6, 8)
+                #vf.plot_convergence(ax=ax[0]) 
+                vf_series[i].plot_s_db(ax=ax[1])
+                ax[0].plot(freqs, 20*np.log10(np.abs(S_samples)), 'r-', label="Source (HFSS)")
+                ax[0].plot(freqs, 20*np.log10(np.abs(vf_S)), 'g--', label="Vector Fit")
+                ax[0].plot(freqs, 20*np.log10(np.abs(pred_S.detach().numpy())), 'b-.', label="Predicted (ANN)")
+                ax[0].set_xlabel("Frequency (GHz)")
+                ax[0].set_ylabel("S_11 (dB)")
+                ax[0].legend()
+                mplt.tight_layout()
                 mplt.show()
             
             # Calculate Loss
@@ -143,7 +152,7 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
             current_loss += loss.item()
         
             if i%10 == 0:
-                print(f"Loss after mini-batch for model order {model_order} %5d: %.3f"%(i+1, current_loss/500))
+                print(f"Loss after mini-batch (model order {model_order}) %5d: %.3f"%(i+1, current_loss/500))
                 current_loss = 0.0
 
     return ANNs
@@ -175,7 +184,7 @@ def train_neural_models(ANNs : dict, model_orders : np.ndarray, tensor_X : torch
             current_loss += loss.item()
         
             if i%10 == 0:
-                print(f"Loss after mini-batch for model order {model_order} %5d: %.3f"%(i+1, current_loss/500))
+                print(f"Loss after mini-batch (model order {model_order}) %5d: %.3f"%(i+1, current_loss/500))
                 current_loss = 0.0
 
     # Set models to eval mode now for inference. Set back to train if training more.
@@ -224,7 +233,7 @@ if __name__ == "__main__":
     test_data = scipy.io.loadmat(test_data_path)
     
     # X = [lp @ ln @ hc]^T (meters), of shape (64, 3) here.
-    # Y is S_11 (dB) over the frequency range (GHz) with 3 vals per sample representing: [frequency (GHz), real, imaginary]
+    # Y is S_11 over the frequency range (GHz) with 3 vals per sample representing: [frequency (GHz), real, imaginary]
     # W is number of points in freq space
     
     X = training_data["candidates"]
@@ -242,9 +251,9 @@ if __name__ == "__main__":
         # Vector Fitting 
         # Just say the vector fitting results are our "observations" for now.
         # Return a list of vector-fitting objects that have been fit for later use.
-        vf_samples = vector_fitting(Y)#, plot=args.plot)
+        vf_samples = vector_fitting(Y)
         # Classify the testing data here too for later.
-        vf_samples_test = vector_fitting(Y_test)#, plot=args.plot)
+        vf_samples_test = vector_fitting(Y_test)
 
         #print("Vector fitting finished, saving to file")
         #for vf in vf_samples:
@@ -347,7 +356,8 @@ if __name__ == "__main__":
     print("Average training MAPE:", test_loss_avg)
    
     # Plot neural net predictions
-    if args.plot:
+    #if args.plot:
+    if True:
         freqs = Y[0][0][:, 0]
         print("Plotting Train Data")
         for i in range(len(Y)):
