@@ -124,7 +124,7 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
             current_loss += loss.item()
         
             if  i != 0 and i%10 == 0:
-                print(f"Loss after mini-batch (model order {model_order}) %5d: %.3f"%(i+1, current_loss/500))
+                print(f"Loss after mini-batch (model order {model_order}) %5d: %.3f"%(i, current_loss/500))
                 current_loss = 0.0
     
     # Set models to eval mode now for inference. Set back to train if training more.
@@ -142,7 +142,7 @@ def train_neural_models(ANNs : dict, model_orders : np.ndarray, tensor_X : torch
         model.train() 
     # Go through each sample, sort by the order (that we got earlier),
     # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the baseline S-param.
-    epochs = 3
+    epochs = 10
     for epoch in range(0,epochs):
         print(f"Starting Epoch {epoch}")
         current_loss = 0.0
@@ -167,7 +167,7 @@ def train_neural_models(ANNs : dict, model_orders : np.ndarray, tensor_X : torch
             current_loss += loss.item()
         
             if i != 0 and i%10 == 0:
-                print(f"Loss after mini-batch (model order {model_order}) %5d: %.3f"%(i+1, current_loss/500))
+                print(f"Loss after mini-batch (model order {model_order}) %5d: %.3f"%(i, current_loss/500))
                 current_loss = 0.0
 
     # Set models to eval mode now for inference.

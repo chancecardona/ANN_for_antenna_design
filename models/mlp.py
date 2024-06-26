@@ -84,7 +84,7 @@ class MLP(nn.Module):
         self.double()
 
         # Also define the optimizer here so we don't need to keep track elsewhere.
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.01)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.02)
 
     def forward(self, x):
         # Normalize input data
