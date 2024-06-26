@@ -11,7 +11,7 @@ import skrf
 import matplotlib.pyplot as mplt
 import torch
 
-from models.mlp import get_device, MLP
+from models.mlp import get_device, PoleResidueTF, MLP
 GHz = 1e9
 
 # Y is the frequency response of S_param. Should have n values of shape [freq, real, imag]
@@ -51,33 +51,6 @@ def vector_fitting(Y : np.ndarray, verbose : bool = True, plot : bool = False) -
     return samples_vf
 
 
-# Pole Residue Transfer Function:
-# H(s) = Sigma(r_i / (s - p_i)) from i=1 to Q (Q is the order of the TF)
-# TODO: Need to make sure all poles are smooth/continuous for this one?
-# Assumes coefficients are all complex data type.
-def PoleResidueTF(poles : torch.Tensor, residues : torch.Tensor, freqs : np.ndarray) -> np.ndarray:
-    epsilon = 1e-9
-    device = get_device()
-    # H is freq response
-    H = torch.zeros(len(freqs), dtype=torch.cdouble).to(device)
-    s = torch.from_numpy(2j*np.pi * freqs).to(device)
-    # s is the frequency
-    for j in range(len(s)):
-        for i in range(len(poles)):
-            p = poles[i]
-            r = residues[i]
-            #if torch.abs(denominator) < epsilon:
-            #   denominator += epsilon * (1 if denominator.real >= 0 else -1)
-            if torch.imag(p) == 0:
-                H[j] += r / (s[j] - p)
-            else:
-                H[j] += r / (s[j] - p) + torch.conj(r) / (s[j] - torch.conj(p))
-    return H
-
-# (Not Implemented) Rational Based Transfer Function:
-# NN 3: Predict a_i (numerator coeffs) for Rational Transfer Function
-# NN 4: Predict b_i (denominator coeffs) for Rational Transfer Function 
-
 # Only need Y for the freqs
 def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarray, plot : bool = False) -> dict:
     x_dims = len(tensor_X[0])
@@ -104,31 +77,30 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
         print(f"Starting Epoch {epoch}")
         current_loss = 0.0
         freqs = Y[0][0][:, 0] 
-        for i in range(len(tensor_X)):
+        for i in range(len(model_orders)):
             model_order = model_orders[i]
             model = ANNs[model_order]
-            optimizer = torch.optim.NAdam(model.parameters(), lr=0.001)
+            # Zero out the grad each train step
+            model.optimizer.zero_grad()
            
             # Predict S_11 via the vector fit coeffs (all residues first, then all poles)
+            # Start with constant coeffs, going to assume only 1 per response function.
+            vf_d = vf_series[i].constant_coeff.item()
+            vf_e = vf_series[i].proportional_coeff.item()
             vf_poles = torch.from_numpy(vf_series[i].poles).to(device)
             vf_residues = torch.from_numpy(vf_series[i].residues[0]).to(device)
-            vf_S = PoleResidueTF(vf_poles, vf_residues, freqs)
+            vf_S = PoleResidueTF(vf_d, vf_e, vf_poles, vf_residues, freqs)
 
             # Predict S_11 via the ANN
-            pred_coeffs = model(tensor_X[i])
-            pred_poles = pred_coeffs[0:model_order]
-            pred_residues = pred_coeffs[model_order:]
-            pred_S = PoleResidueTF(pred_poles, pred_residues, freqs)
+            pred_S = model.predict(tensor_X[i], freqs)
        
             if plot:
                 S_samples = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
-                print(pred_tf_coeffs)
                 print(f"SAMPLE {i} of ORDER {model_order}") 
                 print(f"VF RMS error {vf_series[i].get_rms_error()}")
+                print("VF Consts", vf_d, vf_e)
                 print("VF Poles", vf_series[i].poles)
                 print("VF Residues", vf_series[i].residues)
-                print("ANN Poles", pred_poles.detach().numpy())
-                print("ANN Residues", pred_residues.detach().numpy())
                 #print("Source", S_samples)
                 #print("VF", vf_S)
                 #print("ANN", pred_S.detach().numpy())
@@ -148,12 +120,16 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
             # Calculate Loss
             loss = model.loss_fn(vf_S, pred_S)
             loss.backward()
-            optimizer.step()
+            model.optimizer.step()
             current_loss += loss.item()
         
-            if i%10 == 0:
+            if  i != 0 and i%10 == 0:
                 print(f"Loss after mini-batch (model order {model_order}) %5d: %.3f"%(i+1, current_loss/500))
                 current_loss = 0.0
+    
+    # Set models to eval mode now for inference. Set back to train if training more.
+    for _,model in ANNs.items():
+        model.eval() 
 
     return ANNs
 
@@ -161,9 +137,12 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
 # Y is only used for training after the predicted coefficients are plugged in.
 def train_neural_models(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Tensor, Y : np.ndarray):
     device = get_device()
+    # Set models to train mode for training in case they're in eval.
+    for _,model in ANNs.items():
+        model.train() 
     # Go through each sample, sort by the order (that we got earlier),
     # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the baseline S-param.
-    epochs = 2
+    epochs = 3
     for epoch in range(0,epochs):
         print(f"Starting Epoch {epoch}")
         current_loss = 0.0
@@ -171,28 +150,27 @@ def train_neural_models(ANNs : dict, model_orders : np.ndarray, tensor_X : torch
             freqs = Y[i][0][:, 0]
             model_order = model_orders[i]
             model = ANNs[model_order]
-            optimizer = torch.optim.NAdam(model.parameters(), lr=0.001)
+
+            # Zero out the grad each train step
+            model.optimizer.zero_grad()
             
             # Get ground truth data from Y
             S_11 = torch.from_numpy(Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)).to(device)
 
             # Predict S_11 via the ANN
-            pred_coeffs = model(tensor_X[i])
-            pred_poles = pred_coeffs[0:model_order]
-            pred_residues = pred_coeffs[model_order:]
-            pred_S = PoleResidueTF(pred_poles, pred_residues, freqs)
+            pred_S = model.predict(tensor_X[i], freqs)
             
             # Calculate Loss
             loss = model.loss_fn(S_11, pred_S)
             loss.backward()
-            optimizer.step()
+            model.optimizer.step()
             current_loss += loss.item()
         
-            if i%10 == 0:
+            if i != 0 and i%10 == 0:
                 print(f"Loss after mini-batch (model order {model_order}) %5d: %.3f"%(i+1, current_loss/500))
                 current_loss = 0.0
 
-    # Set models to eval mode now for inference. Set back to train if training more.
+    # Set models to eval mode now for inference.
     for model_order,model in ANNs.items():
         model.eval() 
 
@@ -209,10 +187,7 @@ def predict_samples(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Ten
         model = ANNs[model_order]
 
         # Predict S_11
-        pred_coeffs = model(tensor_X[i])
-        pred_poles = pred_coeffs[0:model_order]
-        pred_residues = pred_coeffs[model_order:]
-        pred_S = PoleResidueTF(pred_poles, pred_residues, freqs)
+        pred_S = model.predict(tensor_X[i], freqs)
         S_predicted_samples.append(pred_S)
     
         # Calculate Loss
@@ -350,8 +325,7 @@ if __name__ == "__main__":
         
         ANNs = {}
         for order in set(np.concatenate([model_orders_predicted, model_orders_test_predicted])):
-            model = torch.load(f"model_weights_output/s_param_ann_order_{order}_p.pkl")
-            model = torch.load(f"model_weights_output/s_param_ann_order_{order}_r.pkl")
+            model = torch.load(f"model_weights_output/s_param_ann_order_{order}.pkl")
             ANNs[order] = model
 
     print(f"Now beginning inference.")
