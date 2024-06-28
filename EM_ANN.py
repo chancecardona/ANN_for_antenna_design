@@ -113,6 +113,8 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
                 ax[0].plot(freqs, 20*np.log10(np.abs(pred_S.detach().numpy())), 'b-.', label="Predicted (ANN)")
                 ax[0].set_xlabel("Frequency (GHz)")
                 ax[0].set_ylabel("S_11 (dB)")
+                ax[0].set_ylabel("S_11 (dB)")
+                ax[0].set_title(f"Order {model_order}")
                 ax[0].legend()
                 mplt.tight_layout()
                 mplt.show()
@@ -142,7 +144,7 @@ def train_neural_models(ANNs : dict, model_orders : np.ndarray, tensor_X : torch
         model.train() 
     # Go through each sample, sort by the order (that we got earlier),
     # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the baseline S-param.
-    epochs = 10
+    epochs = 5
     for epoch in range(0,epochs):
         print(f"Starting Epoch {epoch}")
         current_loss = 0.0
@@ -277,11 +279,11 @@ if __name__ == "__main__":
           
         # Evaluate Average training MAPE # TODO: Should this be Chi Squared?
         err = mean_absolute_percentage_error(model_orders_observed, model_orders_predicted)
-        print(f"Training SVM MAPE is: {err}%")
+        print(f"Training SVM MAPE is: {err*100}%")
         
         # Evaluate Average testing MAPE
         err = mean_absolute_percentage_error(model_orders_test_observed, model_orders_test_predicted)
-        print(f"Testing SVM MAPE is: {err}%")
+        print(f"Testing SVM MAPE is: {err*100}%")
         
         ## Train ANN on EM simulation results and Outputs of pole-residue-based transfer function: ##
         print(f"Training ANNs now...")
@@ -320,8 +322,8 @@ if __name__ == "__main__":
         # Evaluate Average training and testing MAPE # TODO: Should this be Chi Squared?
         #err = mean_absolute_percentage_error(model_orders_observed, model_orders_predicted)
         #err = mean_absolute_percentage_error(model_orders_test_observed, model_orders_test_predicted)
-        #print(f"Training SVM MAPE is: {err}%") 
-        #print(f"Testing SVM MAPE is: {err}%") 
+        #print(f"Training SVM MAPE is: {err * 100}%") 
+        #print(f"Testing SVM MAPE is: {err * 100}%") 
         
         ANNs = {}
         for order in set(np.concatenate([model_orders_predicted, model_orders_test_predicted])):

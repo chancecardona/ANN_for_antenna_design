@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchmetrics.functional.regression import mean_absolute_percentage_error
 import numpy as np
+import models.fourier_features as ff
 
 def get_device():
     device = (
@@ -47,53 +48,65 @@ def PoleResidueTF(d : float, e : float,
 # NN 3: Predict a_i (numerator coeffs) for Rational Transfer Function
 # NN 4: Predict b_i (denominator coeffs) for Rational Transfer Function 
 
+def mlp_layers(input_size, hidden_size, output_size):
+    layers = nn.Sequential(
+        # Input layer
+        nn.Linear(input_size, hidden_size),
+        nn.ReLU(),
+        # First hidden layer (Fully Connected)
+        nn.Linear(hidden_size, hidden_size),
+        nn.ReLU(),
+        # Second hidden layer (Fully Connected)
+        nn.Linear(hidden_size, hidden_size),
+        nn.ReLU(),
+        # Output layer
+        nn.Linear(hidden_size, output_size),
+    )
+    return layers
 
 # Only predicts S parameter.
 class MLP(nn.Module):
     def __init__(self, input_size, model_order):
         super().__init__()
         self.model_order = model_order
+        # Define fourier features here since x is low dimensional
+        # model order is the number of output features
+        fourier_features_size = model_order * 2 # 2 for the residues and the poles, and 2 for the real and imag.
+        self.fourier_features = ff.FourierFeatures(input_size, fourier_features_size, scale=10)
+        fourier_output_size = 2 * fourier_features_size # 2 for sin and cos.
         # Hecht-Nelson method to determine the node number of the hidden layer: 
         # node number of hidden layer is (2n+1) when input layer is (n).
-        hidden_size = (2*input_size + 1)
+        #hidden_size = (2*input_size + 1)
+        hidden_size = (2*fourier_output_size + 1)
         # The output size is 2 times the model order (len of poles) since each coeff is a complex value (return 0im if real only). 
         # +1 because one model predicts d, the other predicts e for the PoleResidueTF.
         output_size = model_order * 2 + 1
 
-        self.p_layers = nn.Sequential(
-            # Input layer
-            nn.Linear(input_size, hidden_size),
-            nn.ReLU(),
-            # First hidden layer (Fully Connected)
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
-            # Output layer
-            nn.Linear(hidden_size, output_size),
-        )
-        self.r_layers = nn.Sequential(
-            # Input layer
-            nn.Linear(input_size, hidden_size),
-            nn.ReLU(),
-            # First hidden layer (Fully Connected)
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
-            # Output layer
-            nn.Linear(hidden_size, output_size),
-        )
+        # Define the mlp layers
+        self.p_layers = mlp_layers(fourier_output_size, hidden_size, output_size)
+        self.r_layers = mlp_layers(fourier_output_size, hidden_size, output_size)
+        #self.p_layers = mlp_layers(input_size, hidden_size, output_size)
+        #self.r_layers = mlp_layers(input_size, hidden_size, output_size)
+
         # If run into performance issues try converting input data instead of model
         self.double()
 
         # Also define the optimizer here so we don't need to keep track elsewhere.
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.02)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.03)
+
 
     def forward(self, x):
         # Normalize input data
         x_norm = F.normalize(x, dim=0)
+        # Fourier Feature the x data since it's low dim
+        x_fourier = self.fourier_features(x_norm)
         # Get poles and d const
-        poles_d = self.p_layers(x_norm)
+        #poles_d = self.p_layers(x_norm)
+        poles_d = self.p_layers(x_fourier)
         d, x_poles = poles_d[-1], poles_d[:-1]
         # Get residues and e const
-        residues_e = self.r_layers(x_norm)
+        #residues_e = self.r_layers(x_norm)
+        residues_e = self.r_layers(x_fourier)
         e, x_residues = residues_e[-1], residues_e[:-1]
         # Layer convention is to output: residue_i real, residue_i imag, pole_i real, pole_i imag
         # This converts that into complex poles and then residues
@@ -102,12 +115,13 @@ class MLP(nn.Module):
         output = torch.cat((d.unsqueeze(0), e.unsqueeze(0), complex_p, complex_r), dim=0)
         return output
 
+    # Used for model evaluation
+    # Using the loss given in eq 10 of (Ding et al.: Neural-Network Approaches to EM-Based Modeling of Passive Components)
     def loss_fn(self, actual_S, predicted_S):
         # Take complex conjugate to do square
         c = predicted_S - actual_S
         return torch.abs(torch.sum(c * torch.conj(c)) / 2)
 
-    # Used for model evaluation
     def error_mape(self, actual_S, predicted_S):
         # S is complex, but MAPE isn't. Do average of r and i parts.
         real_MAPE = mean_absolute_percentage_error(actual_S.real, predicted_S.real)
