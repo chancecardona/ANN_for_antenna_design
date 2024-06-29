@@ -51,9 +51,8 @@ def vector_fitting(Y : np.ndarray, verbose : bool = True, plot : bool = False) -
     return samples_vf
 
 
-# Only need Y for the freqs
-def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarray, plot : bool = False) -> dict:
-    x_dims = len(tensor_X[0])
+def create_neural_models(vf_series : list, X : torch.Tensor, Y : torch.Tensor, freqs : torch.Tensor, plot : bool = False) -> dict:
+    x_dims = len(X[0])
     # This assumes the model order is actually the length of the poles array, and sorts
     # according to that rather than the actual TF order since that corresponds to neuron layers
     # to enable treating real and complex coefficients the same.
@@ -76,7 +75,8 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
     for epoch in range(0,epochs):
         print(f"Starting Epoch {epoch}")
         current_loss = 0.0
-        freqs = Y[0][0][:, 0] 
+        #freqs = torch.from_numpy(Y[0][0][:, 0]).to(device)
+        #freqs = tensor_Y[0][0][:, 0]
         for i in range(len(model_orders)):
             model_order = model_orders[i]
             model = ANNs[model_order]
@@ -89,13 +89,13 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
             vf_e = vf_series[i].proportional_coeff.item()
             vf_poles = torch.from_numpy(vf_series[i].poles).to(device)
             vf_residues = torch.from_numpy(vf_series[i].residues[0]).to(device)
-            vf_S = PoleResidueTF(vf_d, vf_e, vf_poles, vf_residues, freqs)
+            vf_S = PoleResidueTF(vf_d, vf_e, vf_poles, vf_residues, freqs[i])
 
             # Predict S_11 via the ANN
-            pred_S = model.predict(tensor_X[i], freqs)
+            pred_S = model.predict(X[i], freqs[i])
        
             if plot:
-                S_samples = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
+                S_samples = Y[i]
                 print(f"SAMPLE {i} of ORDER {model_order}") 
                 print(f"VF RMS error {vf_series[i].get_rms_error()}")
                 print("VF Consts", vf_d, vf_e)
@@ -108,9 +108,9 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
                 fig.set_size_inches(6, 8)
                 #vf.plot_convergence(ax=ax[0]) 
                 vf_series[i].plot_s_db(ax=ax[1])
-                ax[0].plot(freqs, 20*np.log10(np.abs(S_samples)), 'r-', label="Source (HFSS)")
-                ax[0].plot(freqs, 20*np.log10(np.abs(vf_S)), 'g--', label="Vector Fit")
-                ax[0].plot(freqs, 20*np.log10(np.abs(pred_S.detach().numpy())), 'b-.', label="Predicted (ANN)")
+                ax[0].plot(freqs[i].detach().numpy(), 20*np.log10(np.abs(S_samples)), 'r-', label="Source (HFSS)")
+                ax[0].plot(freqs[i].detach().numpy(), 20*np.log10(np.abs(vf_S)), 'g--', label="Vector Fit")
+                ax[0].plot(freqs[i].detach().numpy(), 20*np.log10(np.abs(pred_S.detach().numpy())), 'b-.', label="Predicted (ANN)")
                 ax[0].set_xlabel("Frequency (GHz)")
                 ax[0].set_ylabel("S_11 (dB)")
                 ax[0].set_ylabel("S_11 (dB)")
@@ -137,19 +137,19 @@ def create_neural_models(vf_series : list, tensor_X : torch.Tensor, Y : np.ndarr
 
 # X is the geometrical input to the model.
 # Y is only used for training after the predicted coefficients are plugged in.
-def train_neural_models(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Tensor, Y : np.ndarray):
+def train_neural_models(ANNs : dict, model_orders : np.ndarray, X : torch.Tensor, Y : torch.Tensor, freqs : torch.Tensor):
     device = get_device()
     # Set models to train mode for training in case they're in eval.
     for _,model in ANNs.items():
         model.train() 
     # Go through each sample, sort by the order (that we got earlier),
     # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the baseline S-param.
-    epochs = 5
+    epochs = 2
     for epoch in range(0,epochs):
         print(f"Starting Epoch {epoch}")
         current_loss = 0.0
-        for i in range(len(tensor_X)):
-            freqs = Y[i][0][:, 0]
+        for i in range(len(X)):
+            #freqs = Y[i][0][:, 0]
             model_order = model_orders[i]
             model = ANNs[model_order]
 
@@ -157,10 +157,11 @@ def train_neural_models(ANNs : dict, model_orders : np.ndarray, tensor_X : torch
             model.optimizer.zero_grad()
             
             # Get ground truth data from Y
-            S_11 = torch.from_numpy(Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)).to(device)
+            #S_11 = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
+            S_11 = Y[i]
 
             # Predict S_11 via the ANN
-            pred_S = model.predict(tensor_X[i], freqs)
+            pred_S = model.predict(X[i], freqs[i])
             
             # Calculate Loss
             loss = model.loss_fn(S_11, pred_S)
@@ -176,20 +177,21 @@ def train_neural_models(ANNs : dict, model_orders : np.ndarray, tensor_X : torch
     for model_order,model in ANNs.items():
         model.eval() 
 
-def predict_samples(ANNs : dict, model_orders : np.ndarray, tensor_X : torch.Tensor, Y : np.ndarray) -> tuple[list, float]:
+def predict_samples(ANNs : dict, model_orders : np.ndarray, X : torch.Tensor, Y : torch.Tensor, freqs : torch.Tensor) -> tuple[list, float]:
     device = get_device()
     # Filter based on test observation
     # Get order for each sample.
     S_predicted_samples = []
     S_predicted_mape_avg = 0.0
     for i in range(len(model_orders)):
-        freqs = Y[i][0][:, 0]
-        S_11 = torch.from_numpy(Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)).to(device)
+        #freqs = Y[i][0][:, 0]
+        #S_11 = torch.from_numpy(Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)).to(device)
+        S_11 =  Y[i]
         model_order = model_orders[i]
         model = ANNs[model_order]
 
         # Predict S_11
-        pred_S = model.predict(tensor_X[i], freqs)
+        pred_S = model.predict(X[i], freqs[i])
         S_predicted_samples.append(pred_S)
     
         # Calculate Loss
@@ -227,8 +229,18 @@ if __name__ == "__main__":
         
     # Allocate relevant items as tensors on the appropriate device (e.g. GPU)
     device = get_device()
-    tensor_X = torch.tensor(X, device=device)
-    tensor_X_test = torch.tensor(X, device=device)
+    tensor_X = torch.FloatTensor(X).to(device)
+    tensor_X_test = torch.FloatTensor(X_test).to(device)
+    Y_data = np.array([y[0] for y in Y])
+    Y_test_data = np.array([y[0] for y in Y_test])
+    freqs = Y_data[:, :, 0]
+    S_11_samples_train = Y_data[:, :, 1] + Y_data[:, :, 2] * 1j
+    S_11_samples_test = Y_test_data[:, :, 1] + (Y_test_data[:, :, 2] * 1j)
+    tensor_freqs = torch.tensor(freqs, dtype=torch.float32, device=device)
+    tensor_S_train = torch.tensor(S_11_samples_train, dtype=torch.complex64, device=device)
+    tensor_S_test  = torch.tensor(S_11_samples_test, dtype=torch.complex64, device=device)
+    #tensor_Y = torch.FloatTensor(Y).to(device)
+    #tensor_Y_test = torch.FloatTensor(torch.from_numpy(Y_test)).to(device)
     
     if args.train: 
         print("Beginning training.")
@@ -288,9 +300,9 @@ if __name__ == "__main__":
         ## Train ANN on EM simulation results and Outputs of pole-residue-based transfer function: ##
         print(f"Training ANNs now...")
 
-        ANNs = create_neural_models(vf_samples, tensor_X, Y, plot=args.plot)
+        ANNs = create_neural_models(vf_samples, tensor_X, tensor_S_train, tensor_freqs, plot=args.plot)
         print("Pre-training on vector-fitting coefficients finished. Beginning fine-tuning with training data.")
-        train_neural_models(ANNs, model_orders_predicted, tensor_X, Y)
+        train_neural_models(ANNs, model_orders_predicted, tensor_X, tensor_S_train, tensor_freqs)
 
         print("Training finished, saving models.")
         for order,model in ANNs.items():
@@ -332,28 +344,31 @@ if __name__ == "__main__":
 
     print(f"Now beginning inference.")
     # Sanity check with Training data
-    S_predicted_samples_train, train_loss_avg = predict_samples(ANNs, model_orders_predicted, tensor_X, Y)
+    S_predicted_samples_train, train_loss_avg = predict_samples(ANNs, model_orders_predicted, tensor_X, tensor_S_train, tensor_freqs)
     print("Average training MAPE:", train_loss_avg)
 
     # Test data
-    S_predicted_samples_test, test_loss_avg = predict_samples(ANNs, model_orders_test_predicted, tensor_X_test, Y_test)
+    S_predicted_samples_test, test_loss_avg = predict_samples(ANNs, model_orders_test_predicted, tensor_X_test, tensor_S_test, tensor_freqs)
     print("Average training MAPE:", test_loss_avg)
    
     # Plot neural net predictions
     #if args.plot:
     if True:
-        freqs = Y[0][0][:, 0]
         print("Plotting Train Data")
         for i in range(len(Y)):
-            S_samples_train = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
-            mplt.plot(freqs, 20*np.log10(np.abs(S_samples_train)), 'r-')
-            mplt.plot(freqs, 20*np.log10(np.abs(S_predicted_samples_train[i].detach().numpy())), 'b-.')
+            mplt.plot(freqs[i], 20*np.log10(np.abs(S_11_samples_train[i])), 'r-', label="Source (HFSS)")
+            mplt.plot(freqs[i], 20*np.log10(np.abs(S_predicted_samples_train[i].detach().numpy())), 'b-.', label="ANN")
+            mplt.xlabel("Frequency (GHz)")
+            mplt.ylabel("S_11 (dB)")
+            mplt.title(f"Order {model_orders_predicted[i]}")
             mplt.show()
         print("Plotting Test data")
         for i in range(len(Y_test)):
-            S_samples_test = Y_test[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
-            mplt.plot(freqs, 20*np.log10(np.abs(S_samples_test)), 'r-')
-            mplt.plot(freqs, 20*np.log10(np.abs(S_predicted_samples_test[i].detach().numpy())), 'b-.')
+            mplt.plot(freqs[i], 20*np.log10(np.abs(S_11_samples_test[i])), 'r-')
+            mplt.plot(freqs[i], 20*np.log10(np.abs(S_predicted_samples_test[i].detach().numpy())), 'b-.')
+            mplt.xlabel("Frequency (GHz)")
+            mplt.ylabel("S_11 (dB)")
+            mplt.title(f"Order {model_orders_predicted_test[i]}")
             mplt.show()
 
     ### Eventually there will be 3 branches:

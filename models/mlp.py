@@ -18,13 +18,14 @@ def get_device():
 # TODO: Need to make sure all poles are smooth/continuous for this one?
 # Assumes coefficients are all complex data type.
 def PoleResidueTF(d : float, e : float, 
-                  poles : torch.Tensor, residues : torch.Tensor, freqs : np.ndarray) -> np.ndarray:
+                  poles : torch.Tensor, residues : torch.Tensor, freqs : torch.Tensor) -> np.ndarray:
     epsilon = 1e-9
     device = get_device()
     # H is freq response
     H = torch.zeros(len(freqs), dtype=torch.cdouble).to(device)
     # s is the angular complex frequency
-    s = torch.from_numpy(2j*np.pi * freqs).to(device)
+    #s = torch.from_numpy(2j*np.pi * freqs).to(device)
+    s = 2j*np.pi * freqs
     for j in range(len(s)):
         #import pdb; pdb.set_trace()
         H[j] += d + s[j]*e
@@ -48,7 +49,7 @@ def PoleResidueTF(d : float, e : float,
 # NN 3: Predict a_i (numerator coeffs) for Rational Transfer Function
 # NN 4: Predict b_i (denominator coeffs) for Rational Transfer Function 
 
-def mlp_layers(input_size, hidden_size, output_size):
+def mlp_layers(input_size : int, hidden_size : int, output_size : int):
     layers = nn.Sequential(
         # Input layer
         nn.Linear(input_size, hidden_size),
@@ -57,8 +58,8 @@ def mlp_layers(input_size, hidden_size, output_size):
         nn.Linear(hidden_size, hidden_size),
         nn.ReLU(),
         # Second hidden layer (Fully Connected)
-        nn.Linear(hidden_size, hidden_size),
-        nn.ReLU(),
+        #nn.Linear(hidden_size, hidden_size),
+        #nn.ReLU(),
         # Output layer
         nn.Linear(hidden_size, output_size),
     )
@@ -66,69 +67,77 @@ def mlp_layers(input_size, hidden_size, output_size):
 
 # Only predicts S parameter.
 class MLP(nn.Module):
-    def __init__(self, input_size, model_order):
+    def __init__(self, input_size : int, model_order : int):
         super().__init__()
         self.model_order = model_order
         # Define fourier features here since x is low dimensional
         # model order is the number of output features
-        fourier_features_size = model_order * 2 # 2 for the residues and the poles, and 2 for the real and imag.
-        self.fourier_features = ff.FourierFeatures(input_size, fourier_features_size, scale=10)
+        fourier_features_size = model_order * 4 # TODO 2 for the residues and the poles, and 2 for the real and imag.
+        self.fourier_features = ff.FourierFeatures(input_size, fourier_features_size, scale=1000)
         fourier_output_size = 2 * fourier_features_size # 2 for sin and cos.
         # Hecht-Nelson method to determine the node number of the hidden layer: 
         # node number of hidden layer is (2n+1) when input layer is (n).
         #hidden_size = (2*input_size + 1)
-        hidden_size = (2*fourier_output_size + 1)
+        self.hidden_size = (2*fourier_output_size + 1)
         # The output size is 2 times the model order (len of poles) since each coeff is a complex value (return 0im if real only). 
         # +1 because one model predicts d, the other predicts e for the PoleResidueTF.
-        output_size = model_order * 2 + 1
+        self.output_size = (model_order * 2 + 1) * 2
 
         # Define the mlp layers
-        self.p_layers = mlp_layers(fourier_output_size, hidden_size, output_size)
-        self.r_layers = mlp_layers(fourier_output_size, hidden_size, output_size)
+        self.layers = mlp_layers(fourier_output_size, self.hidden_size, self.output_size)
+        #self.p_layers = mlp_layers(fourier_output_size, hidden_size, output_size)
+        #self.r_layers = mlp_layers(fourier_output_size, hidden_size, output_size)
         #self.p_layers = mlp_layers(input_size, hidden_size, output_size)
         #self.r_layers = mlp_layers(input_size, hidden_size, output_size)
 
         # If run into performance issues try converting input data instead of model
-        self.double()
+        # Not using double currently as https://discuss.pytorch.org/t/problems-with-target-arrays-of-int-int32-types-in-loss-functions/140/2
+        #self.double()
 
         # Also define the optimizer here so we don't need to keep track elsewhere.
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.03)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.05)
 
 
-    def forward(self, x):
+    def forward(self, x : torch.Tensor) -> torch.Tensor:
         # Normalize input data
-        x_norm = F.normalize(x, dim=0)
+        #x_norm = F.normalize(x, dim=0)
         # Fourier Feature the x data since it's low dim
-        x_fourier = self.fourier_features(x_norm)
+        x_fourier = self.fourier_features(x)
+
+        # Get the d, e constants, the poles, and the residues.
+        coeffs = self.layers(x_fourier)
+        num_poles = self.model_order * 2 # real and imag
+        d, e, poles, residues = coeffs[0], coeffs[1], coeffs[2:num_poles+2], coeffs[num_poles+2:]
+        #TODO import pdb; pdb.set_trace()
         # Get poles and d const
-        #poles_d = self.p_layers(x_norm)
-        poles_d = self.p_layers(x_fourier)
-        d, x_poles = poles_d[-1], poles_d[:-1]
+        #poles_d = self.p_layers(x_fourier)
+        #d, x_poles = poles_d[-1], poles_d[:-1]
         # Get residues and e const
-        #residues_e = self.r_layers(x_norm)
-        residues_e = self.r_layers(x_fourier)
-        e, x_residues = residues_e[-1], residues_e[:-1]
-        # Layer convention is to output: residue_i real, residue_i imag, pole_i real, pole_i imag
+        #residues_e = self.r_layers(x_fourier)
+        #e, x_residues = residues_e[-1], residues_e[:-1]
+
+        # Layer convention is to output: d, e (reals), complex pole, comples residue (real, imag)
         # This converts that into complex poles and then residues
-        complex_p = torch.view_as_complex(x_poles.view(-1, 2))
-        complex_r = torch.view_as_complex(x_residues.view(-1, 2))
+        complex_p = torch.view_as_complex(poles.view(-1, 2))
+        complex_r = torch.view_as_complex(residues.view(-1, 2))
         output = torch.cat((d.unsqueeze(0), e.unsqueeze(0), complex_p, complex_r), dim=0)
         return output
 
     # Used for model evaluation
     # Using the loss given in eq 10 of (Ding et al.: Neural-Network Approaches to EM-Based Modeling of Passive Components)
-    def loss_fn(self, actual_S, predicted_S):
+    def loss_fn(self, actual_S : torch.Tensor, predicted_S : torch.Tensor) -> float:
         # Take complex conjugate to do square
         c = predicted_S - actual_S
-        return torch.abs(torch.sum(c * torch.conj(c)) / 2)
+        return torch.sum(torch.abs(c * torch.conj(c))) / 2
+        #return torch.sum(torch.abs(torch.pow(c, 2))) / 2
 
-    def error_mape(self, actual_S, predicted_S):
+    def error_mape(self, actual_S : torch.Tensor, predicted_S : torch.Tensor) -> float:
         # S is complex, but MAPE isn't. Do average of r and i parts.
         real_MAPE = mean_absolute_percentage_error(actual_S.real, predicted_S.real)
         imag_MAPE = mean_absolute_percentage_error(actual_S.imag, predicted_S.imag)
         return (real_MAPE + imag_MAPE) / 2
 
-    def predict(self, input_X : torch.Tensor, freqs : np.ndarray) -> torch.Tensor: 
+    def predict(self, input_X : torch.Tensor, freqs : torch.Tensor) -> torch.Tensor: 
         if self.training:
             pred_coeffs = self.forward(input_X)
             pred_d = pred_coeffs[0]
