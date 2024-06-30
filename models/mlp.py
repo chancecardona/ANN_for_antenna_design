@@ -72,7 +72,7 @@ class MLP(nn.Module):
         self.model_order = model_order
         # Define fourier features here since x is low dimensional
         # model order is the number of output features
-        fourier_features_size = model_order * 4 # TODO 2 for the residues and the poles, and 2 for the real and imag.
+        fourier_features_size = model_order * 2 # TODO 2 for the residues and the poles, and 2 for the real and imag.
         self.fourier_features = ff.FourierFeatures(input_size, fourier_features_size, scale=1000)
         fourier_output_size = 2 * fourier_features_size # 2 for sin and cos.
         # Hecht-Nelson method to determine the node number of the hidden layer: 
@@ -81,7 +81,7 @@ class MLP(nn.Module):
         self.hidden_size = (2*fourier_output_size + 1)
         # The output size is 2 times the model order (len of poles) since each coeff is a complex value (return 0im if real only). 
         # +1 because one model predicts d, the other predicts e for the PoleResidueTF.
-        self.output_size = (model_order * 2 + 1) * 2
+        self.output_size = (model_order * 2 + 1)# * 2
 
         # Define the mlp layers
         self.layers = mlp_layers(fourier_output_size, self.hidden_size, self.output_size)
@@ -95,7 +95,7 @@ class MLP(nn.Module):
         #self.double()
 
         # Also define the optimizer here so we don't need to keep track elsewhere.
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.05)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.01)
 
 
     def forward(self, x : torch.Tensor) -> torch.Tensor:
@@ -105,9 +105,11 @@ class MLP(nn.Module):
         x_fourier = self.fourier_features(x)
 
         # Get the d, e constants, the poles, and the residues.
-        coeffs = self.layers(x_fourier)
+        pred_coeffs = self.layers(x_fourier)
         num_poles = self.model_order * 2 # real and imag
-        d, e, poles, residues = coeffs[0], coeffs[1], coeffs[2:num_poles+2], coeffs[num_poles+2:]
+        #d, e, poles, residues = pred_coeffs[0], pred_coeffs[1], pred_coeffs[2:num_poles+2], pred_coeffs[num_poles+2:]
+        const_coeff, coeffs = pred_coeffs[0], pred_coeffs[1:].reshape(self.model_order, 2)
+        #import pdb; pdb.set_trace()
         #TODO import pdb; pdb.set_trace()
         # Get poles and d const
         #poles_d = self.p_layers(x_fourier)
@@ -118,42 +120,44 @@ class MLP(nn.Module):
 
         # Layer convention is to output: d, e (reals), complex pole, comples residue (real, imag)
         # This converts that into complex poles and then residues
-        complex_p = torch.view_as_complex(poles.view(-1, 2))
-        complex_r = torch.view_as_complex(residues.view(-1, 2))
-        output = torch.cat((d.unsqueeze(0), e.unsqueeze(0), complex_p, complex_r), dim=0)
+        #complex_p = torch.view_as_complex(poles.view(-1, 2))
+        #complex_r = torch.view_as_complex(residues.view(-1, 2))
+        #output = torch.cat((d.unsqueeze(0), e.unsqueeze(0), complex_p, complex_r), dim=0)
+        complex_coeffs = torch.complex(coeffs[:, 0], coeffs[:, 1])
+        output = torch.cat((const_coeff.unsqueeze(0), complex_coeffs), dim=0)
         return output
 
-    # Used for model evaluation
-    # Using the loss given in eq 10 of (Ding et al.: Neural-Network Approaches to EM-Based Modeling of Passive Components)
-    def loss_fn(self, actual_S : torch.Tensor, predicted_S : torch.Tensor) -> float:
-        # Take complex conjugate to do square
-        c = predicted_S - actual_S
-        return torch.sum(torch.abs(c * torch.conj(c))) / 2
-        #return torch.sum(torch.abs(torch.pow(c, 2))) / 2
+# Used for model evaluation
+# Using the loss given in eq 10 of (Ding et al.: Neural-Network Approaches to EM-Based Modeling of Passive Components)
+def loss_fn(actual_S : torch.Tensor, predicted_S : torch.Tensor) -> float:
+    # Take complex conjugate to do square
+    c = predicted_S - actual_S
+    return torch.sum(torch.abs(c * torch.conj(c))) / 2
+    #return torch.sum(torch.abs(torch.pow(c, 2))) / 2
 
-    def error_mape(self, actual_S : torch.Tensor, predicted_S : torch.Tensor) -> float:
-        # S is complex, but MAPE isn't. Do average of r and i parts.
-        real_MAPE = mean_absolute_percentage_error(actual_S.real, predicted_S.real)
-        imag_MAPE = mean_absolute_percentage_error(actual_S.imag, predicted_S.imag)
-        return (real_MAPE + imag_MAPE) / 2
+def error_mape(actual_S : torch.Tensor, predicted_S : torch.Tensor) -> float:
+    # S is complex, but MAPE isn't. Do average of r and i parts.
+    real_MAPE = mean_absolute_percentage_error(actual_S.real, predicted_S.real)
+    imag_MAPE = mean_absolute_percentage_error(actual_S.imag, predicted_S.imag)
+    return (real_MAPE + imag_MAPE) / 2
 
-    def predict(self, input_X : torch.Tensor, freqs : torch.Tensor) -> torch.Tensor: 
-        if self.training:
-            pred_coeffs = self.forward(input_X)
-            pred_d = pred_coeffs[0]
-            pred_e = pred_coeffs[1]
-            pred_poles = pred_coeffs[2:self.model_order]
-            pred_residues = pred_coeffs[self.model_order:]
-            #print("ANN Poles", pred_poles.detach().numpy())
-            #print("ANN Residues", pred_residues.detach().numpy())
-            return PoleResidueTF(pred_d, pred_e, pred_poles, pred_residues, freqs)
-        else:
-            # Don't calculate gradients in eval mode
-            with torch.no_grad():
-                pred_coeffs = self.forward(input_X)
-                pred_d = pred_coeffs[0]
-                pred_e = pred_coeffs[1]
-                pred_poles = pred_coeffs[2:self.model_order]
-                pred_residues = pred_coeffs[self.model_order:]
-                return PoleResidueTF(pred_d, pred_e, pred_poles, pred_residues, freqs)
+def predict(p_model, r_model, input_X : torch.Tensor, freqs : torch.Tensor) -> torch.Tensor: 
+    if p_model.training:
+        pred_e_poles = p_model.forward(input_X)
+        pred_d_residues = r_model.forward(input_X)
+        pred_e, pred_poles = pred_e_poles[0], pred_e_poles[1:]
+        pred_d, pred_residues = pred_d_residues[0], pred_d_residues[1:]
+        #print("ANN Poles", pred_poles.detach().numpy())
+        #print("ANN Residues", pred_residues.detach().numpy())
+        #return PoleResidueTF(pred_d, pred_e, pred_poles, pred_residues, freqs)
+        return pred_d, pred_e, pred_poles, pred_residues
+    else:
+        # Don't calculate gradients in eval mode
+        with torch.no_grad():
+            pred_e_poles = p_model.forward(input_X)
+            pred_d_residues = r_model.forward(input_X)
+            pred_e, pred_poles = pred_e_poles[0], pred_e_poles[1:]
+            pred_d, pred_residues = pred_d_residues[0], pred_d_residues[1:]
+            #return PoleResidueTF(pred_d, pred_e, pred_poles, pred_residues, freqs)
+            return pred_d, pred_e, pred_poles, pred_residues
 
