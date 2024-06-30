@@ -7,217 +7,12 @@ from sklearn.metrics import mean_absolute_percentage_error # Using SKlearn's MAP
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 import joblib
-import skrf
 import matplotlib.pyplot as mplt
 import torch
 
-from models.mlp import get_device, PoleResidueTF, MLP, loss_fn, error_mape, predict
+from neuro_tf_utils import *
+
 GHz = 1e9
-
-# Y is the frequency response of S_param. Should have n values of shape [freq, real, imag]
-def vector_fitting(Y : np.ndarray, verbose : bool = True, plot : bool = False) -> np.ndarray:
-    n_samples = len(Y)
-    W = len(Y[0][0])
-    # For each candidate sample, we have W [freq, r, i] S-param values
-    # Reserve a list for each input sample to its vectorfitting object result.
-    samples_vf = []
-    
-    for i in range(n_samples):
-        print("Starting candidate sample", i)
-        # Get the complex and real components for each freq sample
-        S_11 = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
-        freqs = Y[i][0][:, 0]
-    
-        # Assuming S=s_11
-        ntwk = skrf.Network(frequency=freqs, s=S_11, name=f"frequency_response_{i}")
-        vf = skrf.VectorFitting(ntwk)
-        vf.auto_fit()
-
-        samples_vf.append(vf)
-        model_orders = vf.get_model_order(vf.poles)
-        if verbose:
-            print(f'model order for sample {i} = {model_orders}')
-            print(f'n_poles_real = {np.sum(vf.poles.imag == 0.0)}')
-            print(f'n_poles_complex = {np.sum(vf.poles.imag > 0.0)}')
-            print(f'RMS Error = {vf.get_rms_error()}')
-        if plot: 
-            fig, ax = mplt.subplots(2, 1)
-            fig.set_size_inches(6, 8)
-            vf.plot_convergence(ax=ax[0]) 
-            vf.plot_s_db(ax=ax[1])
-            mplt.tight_layout()
-            mplt.show()
-          
-    return samples_vf
-
-
-def create_neural_models(vf_series : list, X : torch.Tensor, Y : torch.Tensor, freqs : torch.Tensor, plot : bool = False) -> dict:
-    x_dims = len(X[0])
-    # This assumes the model order is actually the length of the poles array, and sorts
-    # according to that rather than the actual TF order since that corresponds to neuron layers
-    # to enable treating real and complex coefficients the same.
-    model_orders = [len(vf.poles) for vf in vf_series]
-    order_set = set(model_orders)
-    ANNs = {}
-
-    device = get_device()
-    
-    # Create an MLP for each order found
-    for order in order_set:
-        # Real and Imag vectors the same length, even if term is purely Real, so we return complex from mlp.
-        # Form: [const, {poles, residues}] for poles and residues.
-        models = [MLP(x_dims, order).to(device), MLP(x_dims, order).to(device)]
-        # ANN_k corresponds to the order of the tf, but the nodes in ANN_k correspond to the len of the vectors for the coefficients.
-        ANNs[order] = models
- 
-    # Go through each sample, sort by the order (that we got earlier),
-    # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the vector fit coeffs fed through the TF.
-    epochs = 5
-    for epoch in range(0,epochs):
-        print(f"Starting Epoch {epoch}")
-        current_loss = 0.0
-        #freqs = torch.from_numpy(Y[0][0][:, 0]).to(device)
-        #freqs = tensor_Y[0][0][:, 0]
-        for i in range(len(model_orders)):
-            model_order = model_orders[i]
-            models = ANNs[model_order]
-            # Zero out the grad each train step
-            [model.optimizer.zero_grad() for model in models]
-           
-            # Predict S_11 via the vector fit coeffs (all residues first, then all poles)
-            # Start with constant coeffs, going to assume only 1 per response function.
-            vf_d = vf_series[i].constant_coeff.item()
-            vf_e = vf_series[i].proportional_coeff.item()
-            vf_poles = torch.from_numpy(vf_series[i].poles).to(device)
-            vf_residues = torch.from_numpy(vf_series[i].residues[0]).to(device)
-            vf_S = PoleResidueTF(vf_d, vf_e, vf_poles, vf_residues, freqs[i])
-
-            # Predict S_11 via the ANN
-            pred_d, pred_e, pred_poles, pred_residues = predict(models[0], models[1], X[i], freqs[i])
-            pred_S = PoleResidueTF(pred_d, pred_e, pred_poles, pred_residues, freqs[i])
-       
-            if plot:
-                S_samples = Y[i]
-                print(f"SAMPLE {i} of ORDER {model_order}") 
-                print(f"VF RMS error {vf_series[i].get_rms_error()}")
-                print("VF Consts", vf_d, vf_e)
-                print("VF Poles", vf_series[i].poles)
-                print("VF Residues", vf_series[i].residues)
-                #print("Source", S_samples)
-                #print("VF", vf_S)
-                #print("ANN", pred_S.detach().numpy())
-                fig, ax = mplt.subplots(2, 1)
-                fig.set_size_inches(6, 8)
-                #vf.plot_convergence(ax=ax[0]) 
-                vf_series[i].plot_s_db(ax=ax[1])
-                ax[0].plot(freqs[i].detach().numpy(), 20*np.log10(np.abs(S_samples)), 'r-', label="Source (HFSS)")
-                ax[0].plot(freqs[i].detach().numpy(), 20*np.log10(np.abs(vf_S)), 'g--', label="Vector Fit")
-                ax[0].plot(freqs[i].detach().numpy(), 20*np.log10(np.abs(pred_S.detach().numpy())), 'b-.', label="Predicted (ANN)")
-                ax[0].set_xlabel("Frequency (GHz)")
-                ax[0].set_ylabel("S_11 (dB)")
-                ax[0].set_ylabel("S_11 (dB)")
-                ax[0].set_title(f"Order {model_order}")
-                ax[0].legend()
-                mplt.tight_layout()
-                mplt.show()
-            
-            # Calculate Pre trainLoss on just the coefficients
-            #loss = loss_fn(vf_S, pred_S)
-            loss = torch.norm(vf_d - pred_d, p=2) + \
-                   torch.norm(vf_e - pred_e, p=2) + \
-                   torch.norm(vf_poles - pred_poles, p=2) + \
-                   torch.norm(vf_residues - pred_residues, p=2)
-            loss.backward()
-            [model.optimizer.step() for model in models]
-            current_loss += loss.item()
-        
-            if  i != 0 and i%10 == 0:
-                print(f"Loss after mini-batch (model order {model_order}) %5d: %.3f"%(i, current_loss/500))
-                current_loss = 0.0
-
-        # Increment lr scheduler
-        for _,models in ANNs.items():
-            [model.scheduler.step() for model in models]
-    
-    # Set models to eval mode now for inference. Set back to train if training more.
-    for _,models in ANNs.items():
-        [model.eval() for model in models]
-
-    return ANNs
-
-# X is the geometrical input to the model.
-# Y is only used for training after the predicted coefficients are plugged in.
-def train_neural_models(ANNs : dict, model_orders : np.ndarray, X : torch.Tensor, Y : torch.Tensor, freqs : torch.Tensor):
-    device = get_device()
-    # Set models to train mode for training in case they're in eval.
-    for _,models in ANNs.items():
-        [model.train() for model in models]
-    # Go through each sample, sort by the order (that we got earlier),
-    # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the baseline S-param.
-    epochs = 10
-    for epoch in range(0,epochs):
-        print(f"Starting Epoch {epoch}")
-        current_loss = 0.0
-        for i in range(len(X)):
-            #freqs = Y[i][0][:, 0]
-            model_order = model_orders[i]
-            models = ANNs[model_order]
-
-            # Zero out the grad each train step
-            [model.optimizer.zero_grad() for model in models]
-            
-            # Get ground truth data from Y
-            #S_11 = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
-            S_11 = Y[i]
-
-            # Predict S_11 via the ANN
-            pred_d, pred_e, pred_poles, pred_residues = predict(models[0], models[1], X[i], freqs[i])
-            pred_S = PoleResidueTF(pred_d, pred_e, pred_poles, pred_residues, freqs[i])
-            
-            # Calculate Loss
-            loss = loss_fn(S_11, pred_S)
-            loss.backward()
-            [model.optimizer.step() for model in models]
-            current_loss += loss.item()
-        
-            if i != 0 and i%10 == 0:
-                print(f"Loss after mini-batch (model order {model_order}) %5d: %.3f"%(i, current_loss/500))
-                current_loss = 0.0
-
-        # Increment lr scheduler
-        for _,models in ANNs.items():
-            [model.scheduler.step() for model in models]
-
-    # Set models to eval mode now for inference.
-    for model_order,models in ANNs.items():
-        [model.eval() for model in models]
-
-def predict_samples(ANNs : dict, model_orders : np.ndarray, X : torch.Tensor, Y : torch.Tensor, freqs : torch.Tensor) -> tuple[list, float]:
-    device = get_device()
-    # Filter based on test observation
-    # Get order for each sample.
-    S_predicted_samples = []
-    S_predicted_mape_avg = 0.0
-    for i in range(len(model_orders)):
-        #freqs = Y[i][0][:, 0]
-        #S_11 = torch.from_numpy(Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)).to(device)
-        S_11 =  Y[i]
-        model_order = model_orders[i]
-        models = ANNs[model_order]
-
-        # Predict S_11
-        pred_d, pred_e, pred_poles, pred_residues = predict(models[0], models[1], X[i], freqs[i])
-        pred_S = PoleResidueTF(pred_d, pred_e, pred_poles, pred_residues, freqs[i])
-        S_predicted_samples.append(pred_S)
-    
-        # Calculate Loss
-        loss = loss_fn(S_11, pred_S)
-        S_predicted_mape_avg += error_mape(S_11, pred_S).item()
-        if i%10 == 0:
-            print(f"Loss of prediction {i}: {loss.item()}")
-    S_predicted_mape_avg /= len(model_orders)
-    return S_predicted_samples, S_predicted_mape_avg
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Trains or evaluates an ANN to predict the S_11 freq response using .mat files")
@@ -283,12 +78,8 @@ if __name__ == "__main__":
         print("Training SVM now.")
         # Train SVM:
         # Need to predict the Order based on the input S-parameter (over frequency space).
-        # SVM Input: geometrical variables
-        # SVM Output: TF Order (vector fitting on S-param in f-space)
-        # SVM Error: Predicted TF Order - Vector Fit TF Order  
         # SVC for versatility in parameters, LinearSVC may be preferrable.
-        # TODO: one versus one, vs one versus rest (ovo vs ovho)
-        # ['linear', 'poly', 'rbf', sigmoid']
+        # tried over ['linear', 'poly', 'rbf', sigmoid']
         svc = svm.SVC(kernel='sigmoid')
         # Scale data with the StandardScaler
         clf = make_pipeline(StandardScaler(), svc)
@@ -305,7 +96,7 @@ if __name__ == "__main__":
         model_orders_test_predicted = clf.predict(X_test)
         print(f"Test Predicted: {model_orders_test_predicted}")
           
-        # Evaluate Average training MAPE # TODO: Should this be Chi Squared?
+        # Evaluate Average training MAPE
         err = mean_absolute_percentage_error(model_orders_observed, model_orders_predicted)
         print(f"Training SVM MAPE is: {err*100}%")
         
@@ -348,7 +139,7 @@ if __name__ == "__main__":
         print(f"Train Predicted: {model_orders_predicted}") 
         print(f"Test Predicted: {model_orders_test_predicted}")
           
-        # Evaluate Average training and testing MAPE # TODO: Should this be Chi Squared?
+        # Evaluate Average training and testing MAPE 
         #err = mean_absolute_percentage_error(model_orders_observed, model_orders_predicted)
         #err = mean_absolute_percentage_error(model_orders_test_observed, model_orders_test_predicted)
         #print(f"Training SVM MAPE is: {err * 100}%") 

@@ -9,10 +9,8 @@ class FourierFeatures(nn.Module):
         super(FourierFeatures, self).__init__()
         # Creating the B matrix
         self.B = nn.Parameter(torch.randn(size=(num_features, input_dim)) * scale, requires_grad=False)
-        #self.double()
 
     def forward(self, x : torch.Tensor) -> torch.Tensor:
-        #import pdb; pdb.set_trace()
         # Projecting input x to a higher-dimensional space using B
         x_proj = 2 * np.pi * torch.matmul(x, self.B.T)
         # Concatenating cos and sin transformations
@@ -29,10 +27,6 @@ class TestFourierFeatures(unittest.TestCase):
         test_inputs = torch.tensor([[0.1, 0.2], [10.3, 100.4]])
         outputs = ff(test_inputs)
 
-        #mplt.plot(test_inputs)
-        #mplt.plot(outputs, label="output")
-        #mplt.show()
-        
         # Check the output dimensions
         self.assertEqual(outputs.shape, (2, 2 * num_features))  # Check output size
         
