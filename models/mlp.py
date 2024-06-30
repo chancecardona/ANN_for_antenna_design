@@ -17,8 +17,7 @@ def get_device():
 # H(s) = Sigma(r_i / (s - p_i)) from i=1 to Q (Q is the order of the TF)
 # TODO: Need to make sure all poles are smooth/continuous for this one?
 # Assumes coefficients are all complex data type.
-def PoleResidueTF(d : float, e : float, 
-                  poles : torch.Tensor, residues : torch.Tensor, freqs : torch.Tensor) -> np.ndarray:
+def PoleResidueTF(d : float, e : float, poles : torch.Tensor, residues : torch.Tensor, freqs : torch.Tensor) -> np.ndarray:
     epsilon = 1e-9
     device = get_device()
     # H is freq response
@@ -32,12 +31,14 @@ def PoleResidueTF(d : float, e : float,
         for i in range(len(poles)):
             p = poles[i]
             r = residues[i]
-            #if torch.abs(denominator) < epsilon:
-            #   denominator += epsilon * (1 if denominator.real >= 0 else -1)
+            denominator = (s[j] - p)
+            if torch.abs(denominator) < epsilon:
+               print("Warning, pole inf detected due to pole singularity.")
+               denominator += epsilon * (1 if denominator.real >= 0 else -1)
             if torch.imag(p) == 0:
-                H[j] += r / (s[j] - p)
+                H[j] += r / denominator
             else:
-                H[j] += r / (s[j] - p) + torch.conj(r) / (s[j] - torch.conj(p))
+                H[j] += r / denominator + torch.conj(r) / (s[j] - torch.conj(p))
     return H
 
 # Literature (Zhao, Feng, Zhang and Jin's Parametric Modeling of EM Behavior of Microwave... Hybrid-Based Transfer Functions) breaks the NN into 2:
@@ -73,7 +74,7 @@ class MLP(nn.Module):
         # Define fourier features here since x is low dimensional
         # model order is the number of output features
         fourier_features_size = model_order * 2 # TODO 2 for the residues and the poles, and 2 for the real and imag.
-        self.fourier_features = ff.FourierFeatures(input_size, fourier_features_size, scale=1000)
+        self.fourier_features = ff.FourierFeatures(input_size, fourier_features_size, scale=100)
         fourier_output_size = 2 * fourier_features_size # 2 for sin and cos.
         # Hecht-Nelson method to determine the node number of the hidden layer: 
         # node number of hidden layer is (2n+1) when input layer is (n).
@@ -95,7 +96,9 @@ class MLP(nn.Module):
         #self.double()
 
         # Also define the optimizer here so we don't need to keep track elsewhere.
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.01)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.6)
+        # Reduces lr by a factor of gamma every step_size epochs.
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=4, gamma=0.6)
 
 
     def forward(self, x : torch.Tensor) -> torch.Tensor:

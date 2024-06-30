@@ -26,7 +26,7 @@ class TestFourierFeatures(unittest.TestCase):
         ff = FourierFeatures(input_dim, num_features, scale)
         
         # Creating test inputs
-        test_inputs = torch.tensor([[0.1, 0.2], [0.3, 0.4]])
+        test_inputs = torch.tensor([[0.1, 0.2], [10.3, 100.4]])
         outputs = ff(test_inputs)
 
         #mplt.plot(test_inputs)
