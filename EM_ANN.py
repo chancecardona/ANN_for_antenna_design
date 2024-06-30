@@ -160,7 +160,7 @@ if __name__ == "__main__":
     # Test data
     print("Starting test run for actual accuracy.")
     S_predicted_samples_test, test_loss_avg = predict_samples(ANNs, model_orders_test_predicted, tensor_X_test, tensor_S_test, tensor_freqs)
-    print("Average training MAPE:", test_loss_avg*100)
+    print("Average testing MAPE:", test_loss_avg*100)
    
     # Plot neural net predictions
     #if args.plot:

@@ -1,8 +1,10 @@
 numpy
 matplotlib
+pytest
 scikit-learn
 scikit-rf
 scipy
 skrf
 torch
 torchmetrics
+torchtest

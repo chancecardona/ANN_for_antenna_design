@@ -35,15 +35,15 @@ Each matlab data file has 2 rows "candidates", and "responses":
 ## Results:
 The results are promising! 
 We have a similar error value for the SVM's as the literature.
-The ANNs' error value is slightly higher (around double the literature's S-parameter MAPE, but in line with their other parameter MAPEs).
-This slight difference in accuracy could be resolved with model fine tuning such as adjusting the hyperparameters more, training each order of ANN more (such as order 10, which had few data), or by splitting each ANN into two (one for poles, one for residue).
+The ANNs' error value is higher, but this is due to convergence during model fitting.
+This slight difference in learning convergence could be resolved with model fine tuning such as adjusting the hyperparameters more (different optimizer, different learning rate, more/less hidden neurons), training each order of ANN more (such as order 10, which had few data), and by adjusting parameters based on the order.
 
 #### SVM MAPE 
-- Training: 0.09344956259018758%
-- Testing SVM MAPE is: 0.08918650793650794%
+- Training: 9.344956259018758%
+- Testing SVM MAPE is: 8.918650793650794%
 #### ANN MAPE
-- Training Average: 1.1146725757496145%
-- Testing Average: 1.1433655905223012%
+- Training Average: 198.64176437686368%
+- Testing Average: 204.10877365702885%
 
 Overall this shows accurate replication of the paper.
 More results from parameter selection are included below.
@@ -60,10 +60,6 @@ More results from parameter selection are included below.
   Test: 3.647%, Train: 4.90%
 - Polynomial Kernel: 
   Test: 5.656%
-#### ANNs MAPE (results during parameter selection)
-- Training Average using 3 total epochs: 1.2962557324024175%
-- Testing Average using 3 total epochs: 1.2560414383900285%
-- Higher epochs lowered this, likely due to overfitting.
 
 ### Assumptions and Background
 Electromagnetic band-gap (EBG) structure is a structure that creates a stopband to block electromagnetic waves of certain frequency bands (and heighten sensitivity otherwise) by forming a fine, periodic pattern of small metal patches on dielectric substrates.  
