@@ -62,9 +62,9 @@ class MLP(nn.Module):
         #self.double()
 
         # Also define the optimizer here so we don't need to keep track elsewhere.
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.7)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.2)
         # Reduces lr by a factor of gamma every step_size epochs.
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=3, gamma=0.6)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=3, gamma=0.8)
 
 
     def forward(self, x : torch.Tensor) -> torch.Tensor:

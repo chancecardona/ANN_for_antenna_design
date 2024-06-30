@@ -7,7 +7,7 @@ from models.mlp import MLP, get_device
 
 
 # Y is the frequency response of S_param. Should have n values of shape [freq, real, imag]
-def vector_fitting(Y : np.ndarray, verbose : bool = True, plot : bool = False) -> np.ndarray:
+def vector_fitting(Y : np.ndarray, verbose : bool = False, plot : bool = False) -> np.ndarray:
     n_samples = len(Y)
     W = len(Y[0][0])
     # For each candidate sample, we have W [freq, r, i] S-param values
@@ -203,7 +203,7 @@ def train_neural_models(ANNs : dict, model_orders : np.ndarray, X : torch.Tensor
         [model.train() for model in models]
     # Go through each sample, sort by the order (that we got earlier),
     # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the baseline S-param.
-    epochs = 10
+    epochs = 30
     for epoch in range(0,epochs):
         print(f"Starting Epoch {epoch}")
         current_loss = 0.0

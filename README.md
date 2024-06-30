@@ -16,11 +16,18 @@ pip3 install -r requirements.txt
 ```
 python3 EM_ANN.py --train
 ```
+There's also a `--plot` option to plot the results during each intermediate step.
 
 ### Inference
 If using Git-LFS you should be able to run in inference mode right away.
 ```
 python3 EM_ANN.py
+```
+
+### Testing
+To run pytest and test the neural net:
+```
+pytest test_model.py
 ```
 
 ## Info
@@ -42,8 +49,8 @@ This slight difference in learning convergence could be resolved with model fine
 - Training: 9.344956259018758%
 - Testing SVM MAPE is: 8.918650793650794%
 #### ANN MAPE
-- Training Average: 198.64176437686368%
-- Testing Average: 204.10877365702885%
+- Training Average: 130.04%
+- Testing Average: 124.41%
 
 Overall this shows accurate replication of the paper.
 More results from parameter selection are included below.
