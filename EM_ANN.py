@@ -3,7 +3,7 @@ import os
 import numpy as np
 import scipy.io # Read Matlab files
 from sklearn import svm # SVM
-from sklearn.metrics import mean_absolute_percentage_error # Using SKlearn's MAPE for np
+from sklearn.metrics import mean_absolute_percentage_error, classification_report, accuracy_score, confusion_matrix
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 import joblib
@@ -50,8 +50,6 @@ if __name__ == "__main__":
     tensor_freqs = torch.tensor(freqs, dtype=torch.float32, device=device)
     tensor_S_train = torch.tensor(S_11_samples_train, dtype=torch.complex64, device=device)
     tensor_S_test  = torch.tensor(S_11_samples_test, dtype=torch.complex64, device=device)
-    #tensor_Y = torch.FloatTensor(Y).to(device)
-    #tensor_Y_test = torch.FloatTensor(torch.from_numpy(Y_test)).to(device)
     
     if args.train: 
         print("Beginning training.")
@@ -89,20 +87,30 @@ if __name__ == "__main__":
         joblib.dump(clf,"model_weights_output/svm.pkl")
         
         # SVM predict on Train Data for a sanity check. 
+        print(f"Train Actual Model Orders (VF): {model_orders_observed}")
         model_orders_predicted = clf.predict(X)
-        print(f"Train Predicted: {model_orders_predicted}")
+        print(f"Train Predicted Model Orders: {model_orders_predicted}")
         
         # SVM predict on Test Data
+        print(f"Test Actual (VF) Model Orders: {model_orders_observed}")
         model_orders_test_predicted = clf.predict(X_test)
-        print(f"Test Predicted: {model_orders_test_predicted}")
+        print(f"Test Predicted Model Orders: {model_orders_test_predicted}")
           
-        # Evaluate Average training MAPE
-        err = mean_absolute_percentage_error(model_orders_observed, model_orders_predicted)
-        print(f"Training SVM MAPE is: {err*100}%")
+        # Evaluate Average training Accuracy
+        train_accuracy = accuracy_score(model_orders_observed, model_orders_predicted)
+        train_conf_matrix = confusion_matrix(model_orders_observed, model_orders_predicted)
+        train_cls_report = classification_report(model_orders_observed, model_orders_predicted, zero_division=0)
+        print(f"Training SVM Accuracy is: {train_accuracy}%")
+        print(f"Training SVM Confusion Matrix\n", train_conf_matrix)
+        print(f"Training SVM Classification Report", train_cls_report)
         
-        # Evaluate Average testing MAPE
-        err = mean_absolute_percentage_error(model_orders_test_observed, model_orders_test_predicted)
-        print(f"Testing SVM MAPE is: {err*100}%")
+        # Evaluate Average testing Accuracy
+        test_accuracy = accuracy_score(model_orders_test_observed, model_orders_test_predicted)
+        test_conf_matrix = confusion_matrix(model_orders_test_observed, model_orders_test_predicted)
+        test_cls_report = classification_report(model_orders_test_observed, model_orders_test_predicted, zero_division=0)
+        print(f"Testing SVM Accuracy is: {test_accuracy}%")
+        print(f"Testing SVM Confusion Matrix\n", test_conf_matrix)
+        print(f"Testing SVM Classification Report", test_cls_report)
         
         ## Train ANN on EM simulation results and Outputs of pole-residue-based transfer function: ##
         print(f"Training ANNs now...")
@@ -139,11 +147,6 @@ if __name__ == "__main__":
         print(f"Train Predicted: {model_orders_predicted}") 
         print(f"Test Predicted: {model_orders_test_predicted}")
           
-        # Evaluate Average training and testing MAPE 
-        #err = mean_absolute_percentage_error(model_orders_observed, model_orders_predicted)
-        #err = mean_absolute_percentage_error(model_orders_test_observed, model_orders_test_predicted)
-        #print(f"Training SVM MAPE is: {err * 100}%") 
-        #print(f"Testing SVM MAPE is: {err * 100}%") 
         
         ANNs = {}
         for order in set(np.concatenate([model_orders_predicted, model_orders_test_predicted])):
