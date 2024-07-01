@@ -15,7 +15,6 @@ def vector_fitting(Y : np.ndarray, verbose : bool = False, plot : bool = False) 
     samples_vf = []
     
     for i in range(n_samples):
-        print("Starting candidate sample", i)
         # Get the complex and real components for each freq sample
         S_11 = Y[i][0][:, 1] + (Y[i][0][:, 2] * 1j)
         freqs = Y[i][0][:, 0]
@@ -28,6 +27,7 @@ def vector_fitting(Y : np.ndarray, verbose : bool = False, plot : bool = False) 
         samples_vf.append(vf)
         model_orders = vf.get_model_order(vf.poles)
         if verbose:
+            print("Vector Fitting candidate sample", i)
             print(f'model order for sample {i} = {model_orders}')
             print(f'n_poles_real = {np.sum(vf.poles.imag == 0.0)}')
             print(f'n_poles_complex = {np.sum(vf.poles.imag > 0.0)}')
@@ -123,7 +123,7 @@ def create_neural_models(vf_series : list, X : torch.Tensor, Y : torch.Tensor, f
  
     # Go through each sample, sort by the order (that we got earlier),
     # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the vector fit coeffs fed through the TF.
-    epochs = 10
+    epochs = 3
     for epoch in range(0,epochs):
         print(f"Starting Epoch {epoch}")
         current_loss = 0.0
@@ -204,7 +204,7 @@ def train_neural_models(ANNs : dict, model_orders : np.ndarray, X : torch.Tensor
         [model.train() for model in models]
     # Go through each sample, sort by the order (that we got earlier),
     # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the baseline S-param.
-    epochs = 20
+    epochs = 15
     for epoch in range(0,epochs):
         print(f"Starting Epoch {epoch}")
         current_loss = 0.0

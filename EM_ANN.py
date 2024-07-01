@@ -11,6 +11,7 @@ import matplotlib.pyplot as mplt
 import torch
 
 from neuro_tf_utils import *
+import models.fourier_features as ff
 
 GHz = 1e9
 
@@ -77,39 +78,48 @@ if __name__ == "__main__":
         # Train SVM:
         # Need to predict the Order based on the input S-parameter (over frequency space).
         # tried over ['linear', 'poly', 'rbf', sigmoid']. ovo vs ovr doesn't seem to matter.
-        svc = svm.SVC(kernel='rbf')
+        #svc = svm.SVC(kernel='rbf') # Use this class if not using "balanced" or FourierFeatures.
+        svc = svm.SVC(kernel='poly', degree=6, class_weight="balanced")
         # Scale data with the StandardScaler
         clf = make_pipeline(StandardScaler(), svc)
-        clf.fit(X, model_orders_observed)
+        # Input (X) length, output fourier features (will do 10 of sin/cos each for 20), and std_dev of freq
+        # Uncomment this if you want to do fourier features instead. Results in overfitting.
+        FF = ff.FourierFeatures(3, 8, scale=0.5).to(device)
+        X_fourier = FF(tensor_X).detach().cpu().numpy()
+        clf.fit(X_fourier, model_orders_observed)
+        #clf.fit(X, model_orders_observed)
 
         print("SVM has been fit, saving to pickle.")
         joblib.dump(clf,"model_weights_output/svm.pkl")
         
         # SVM predict on Train Data for a sanity check. 
         print(f"Train Actual Model Orders (VF): {model_orders_observed}")
-        model_orders_predicted = clf.predict(X)
+        model_orders_predicted = clf.predict(X_fourier)
+        #model_orders_predicted = clf.predict(X)
         print(f"Train Predicted Model Orders: {model_orders_predicted}")
         
         # SVM predict on Test Data
         print(f"Test Actual (VF) Model Orders: {model_orders_observed}")
-        model_orders_test_predicted = clf.predict(X_test)
+        X_test_fourier = FF(tensor_X_test).detach().cpu().numpy()
+        model_orders_test_predicted = clf.predict(X_test_fourier)
+        #model_orders_test_predicted = clf.predict(X_test)
         print(f"Test Predicted Model Orders: {model_orders_test_predicted}")
           
         # Evaluate Average training Accuracy
         train_accuracy = accuracy_score(model_orders_observed, model_orders_predicted)
         train_conf_matrix = confusion_matrix(model_orders_observed, model_orders_predicted)
         train_cls_report = classification_report(model_orders_observed, model_orders_predicted, zero_division=0)
-        print(f"Training SVM Accuracy is: {train_accuracy}%")
+        print(f"Training SVM Accuracy is: {train_accuracy*100}%")
         print(f"Training SVM Confusion Matrix\n", train_conf_matrix)
-        print(f"Training SVM Classification Report", train_cls_report)
+        print(f"Training SVM Classification Report\n", train_cls_report)
         
         # Evaluate Average testing Accuracy
         test_accuracy = accuracy_score(model_orders_test_observed, model_orders_test_predicted)
         test_conf_matrix = confusion_matrix(model_orders_test_observed, model_orders_test_predicted)
         test_cls_report = classification_report(model_orders_test_observed, model_orders_test_predicted, zero_division=0)
-        print(f"Testing SVM Accuracy is: {test_accuracy}%")
+        print(f"Testing SVM Accuracy is: {test_accuracy*100}%")
         print(f"Testing SVM Confusion Matrix\n", test_conf_matrix)
-        print(f"Testing SVM Classification Report", test_cls_report)
+        print(f"Testing SVM Classification Report\n", test_cls_report)
         
         ## Train ANN on EM simulation results and Outputs of pole-residue-based transfer function: ##
         print(f"Training ANNs now...")
