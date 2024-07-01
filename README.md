@@ -4,7 +4,12 @@ This is based on the paper [Multiparameter Modeling with ANN for Antenna Design]
 
 ## Environment and Setup
 ### Environment
-This was tested with Debian 12 (and Ubuntu 22.04) using Python 3.9.
+This was tested with Debian 12 (and Ubuntu 22.04) using Python 3.9. 
+You can use [pyenv](https://github.com/pyenv/pyenv) to manage this.
+```
+pyenv install 3.9
+pyenv local 3.9
+```
 
 ### Installation
 You should also have CUDA installed along with necessary drivers for your GPU.

@@ -46,7 +46,7 @@ def vector_fitting(Y : np.ndarray, verbose : bool = False, plot : bool = False) 
 # H(s) = Sigma(r_i / (s - p_i)) from i=1 to Q (Q is the order of the TF)
 # TODO: Need to make sure all poles are smooth/continuous for this one?
 # Assumes coefficients are all complex data type.
-def PoleResidueTF(d : float, e : float, poles : torch.Tensor, residues : torch.Tensor, freqs : torch.Tensor) -> np.ndarray:
+def PoleResidueTF(d : float, e : float, poles : torch.Tensor, residues : torch.Tensor, freqs : torch.Tensor) -> torch.Tensor:
     epsilon = 1e-9
     device = get_device()
     # H is freq response
@@ -89,8 +89,8 @@ def predict(p_model, r_model, input_X : torch.Tensor, freqs : torch.Tensor) -> t
         pred_d_residues = r_model.forward(input_X)
         pred_e, pred_poles = pred_e_poles[0], pred_e_poles[1:]
         pred_d, pred_residues = pred_d_residues[0], pred_d_residues[1:]
-        #print("ANN Poles", pred_poles.detach().numpy())
-        #print("ANN Residues", pred_residues.detach().numpy())
+        #print("ANN Poles", pred_poles.detach().cpu().numpy())
+        #print("ANN Residues", pred_residues.detach().cpu().numpy())
         return pred_d, pred_e, pred_poles, pred_residues
     else:
         # Don't calculate gradients in eval mode
@@ -144,9 +144,10 @@ def create_neural_models(vf_series : list, X : torch.Tensor, Y : torch.Tensor, f
             # Predict S_11 via the ANN
             pred_d, pred_e, pred_poles, pred_residues = predict(models[0], models[1], X[i], freqs[i])
             pred_S = PoleResidueTF(pred_d, pred_e, pred_poles, pred_residues, freqs[i])
-       
+      
+            freqs_np = freqs.detach().cpu().numpy()
             if plot:
-                S_samples = Y[i]
+                S_samples = Y[i].detach().cpu().numpy()
                 print(f"SAMPLE {i} of ORDER {model_order}") 
                 print(f"VF RMS error {vf_series[i].get_rms_error()}")
                 print("VF Consts", vf_d, vf_e)
@@ -154,14 +155,14 @@ def create_neural_models(vf_series : list, X : torch.Tensor, Y : torch.Tensor, f
                 print("VF Residues", vf_series[i].residues)
                 #print("Source", S_samples)
                 #print("VF", vf_S)
-                #print("ANN", pred_S.detach().numpy())
+                #print("ANN", pred_S.detach().cpu().numpy())
                 fig, ax = mplt.subplots(2, 1)
                 fig.set_size_inches(6, 8)
                 #vf.plot_convergence(ax=ax[0]) 
                 vf_series[i].plot_s_db(ax=ax[1])
-                ax[0].plot(freqs[i].detach().numpy(), 20*np.log10(np.abs(S_samples)), 'r-', label="Source (HFSS)")
-                ax[0].plot(freqs[i].detach().numpy(), 20*np.log10(np.abs(vf_S)), 'g--', label="Vector Fit")
-                ax[0].plot(freqs[i].detach().numpy(), 20*np.log10(np.abs(pred_S.detach().numpy())), 'b-.', label="Predicted (ANN)")
+                ax[0].plot(freqs_np[i], 20*np.log10(np.abs(S_samples)), 'r-', label="Source (HFSS)")
+                ax[0].plot(freqs_np[i], 20*np.log10(np.abs(vf_S.detach().cpu().numpy())), 'g--', label="Vector Fit")
+                ax[0].plot(freqs_np[i], 20*np.log10(np.abs(pred_S.detach().cpu().numpy())), 'b-.', label="Predicted (ANN)")
                 ax[0].set_xlabel("Frequency (GHz)")
                 ax[0].set_ylabel("S_11 (dB)")
                 ax[0].set_ylabel("S_11 (dB)")

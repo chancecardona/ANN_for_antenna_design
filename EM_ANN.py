@@ -171,7 +171,7 @@ if __name__ == "__main__":
         print("Plotting Train data")
         for i in range(len(Y)):
             mplt.plot(freqs[i], 20*np.log10(np.abs(S_11_samples_train[i])), 'r-', label="Source (HFSS)")
-            mplt.plot(freqs[i], 20*np.log10(np.abs(S_predicted_samples_train[i].detach().numpy())), 'b-.', label="ANN")
+            mplt.plot(freqs[i], 20*np.log10(np.abs(S_predicted_samples_train[i].cpu().detach().numpy())), 'b-.', label="ANN")
             mplt.xlabel("Frequency (GHz)")
             mplt.ylabel("S_11 (dB)")
             mplt.title(f"Order {model_orders_predicted[i]}")
@@ -179,7 +179,7 @@ if __name__ == "__main__":
         print("Plotting Test data")
         for i in range(len(Y_test)):
             mplt.plot(freqs[i], 20*np.log10(np.abs(S_11_samples_test[i])), 'r-')
-            mplt.plot(freqs[i], 20*np.log10(np.abs(S_predicted_samples_test[i].detach().numpy())), 'b-.')
+            mplt.plot(freqs[i], 20*np.log10(np.abs(S_predicted_samples_test[i].cpu().detach().numpy())), 'b-.')
             mplt.xlabel("Frequency (GHz)")
             mplt.ylabel("S_11 (dB)")
             mplt.title(f"Order {model_orders_test_predicted[i]}")
