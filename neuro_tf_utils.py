@@ -170,12 +170,12 @@ def create_neural_models(vf_series : list, X : torch.Tensor, Y : torch.Tensor, f
                 mplt.tight_layout()
                 mplt.show()
             
-            # Calculate Pre trainLoss on just the coefficients
             #loss = loss_fn(vf_S, pred_S)
-            loss = torch.norm(vf_d - pred_d, p=2) + \
+            # Calculate Pre trainLoss on just the coefficients (multiplied by a constant for gradient descent)
+            loss = 10000 * (torch.norm(vf_d - pred_d, p=2) + \
                    torch.norm(vf_e - pred_e, p=2) + \
                    torch.norm(vf_poles - pred_poles, p=2) + \
-                   torch.norm(vf_residues - pred_residues, p=2)
+                   torch.norm(vf_residues - pred_residues, p=2))
             loss.backward()
             [model.optimizer.step() for model in models]
             current_loss += loss.item()
@@ -203,7 +203,7 @@ def train_neural_models(ANNs : dict, model_orders : np.ndarray, X : torch.Tensor
         [model.train() for model in models]
     # Go through each sample, sort by the order (that we got earlier),
     # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the baseline S-param.
-    epochs = 30
+    epochs = 20
     for epoch in range(0,epochs):
         print(f"Starting Epoch {epoch}")
         current_loss = 0.0

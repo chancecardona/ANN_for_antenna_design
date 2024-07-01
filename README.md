@@ -49,12 +49,12 @@ This also could have been improved by more hypothetical accuracy in the SVM with
 ### SVM MAPE 
 - Training: 9.35%
 - Testing: 8.92%
-### ANN Error
-- Training Average: 336.18%
-    8: ~30
-    9: ~150
+### ANN Error (Current)
+- Training Average: 213.16%
+    8: ~360
+    9: ~320
     11: ~40
-- Testing Average: 349.05%
+- Testing Average: 446.92%
 
 Overall this shows accurate replication of the paper.
 More results from parameter selection are included below.
@@ -77,6 +77,12 @@ More results from parameter selection are included below.
 - LR_initial = 0.7, LR_decay=0.6 (step size 3):
     - Training Average: 130.04%
     - Testing Average: 124.41%
+- LR_initial = 0.2, LR_decay=0.85 (step size 3)
+    - Training Average: 336.18%
+        8: ~30
+        9: ~150
+        11: ~40
+    - Testing Average: 349.05%
 
 ## Info
 ### Data Format

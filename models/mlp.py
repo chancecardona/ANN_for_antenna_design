@@ -62,9 +62,10 @@ class MLP(nn.Module):
         #self.double()
 
         # Also define the optimizer here so we don't need to keep track elsewhere.
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.2)
+        lr = max(0.09, min(0.2 * (self.model_order / 8)**8, 0.98)) # Want LR of about 0.2 for 8, 0.5 for 10, clamp between .1 to ~1
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         # Reduces lr by a factor of gamma every step_size epochs.
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=3, gamma=0.8)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=3, gamma=0.85)
 
 
     def forward(self, x : torch.Tensor) -> torch.Tensor:
