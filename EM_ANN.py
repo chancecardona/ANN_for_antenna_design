@@ -76,9 +76,8 @@ if __name__ == "__main__":
         print("Training SVM now.")
         # Train SVM:
         # Need to predict the Order based on the input S-parameter (over frequency space).
-        # SVC for versatility in parameters, LinearSVC may be preferrable.
-        # tried over ['linear', 'poly', 'rbf', sigmoid']
-        svc = svm.SVC(kernel='sigmoid')
+        # tried over ['linear', 'poly', 'rbf', sigmoid']. ovo vs ovr doesn't seem to matter.
+        svc = svm.SVC(kernel='rbf')
         # Scale data with the StandardScaler
         clf = make_pipeline(StandardScaler(), svc)
         clf.fit(X, model_orders_observed)

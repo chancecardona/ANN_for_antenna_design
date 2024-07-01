@@ -65,6 +65,23 @@ Overall this shows accurate replication of the paper.
 More results from parameter selection are included below.
 
 ### Training Parameters
+#### SVM Accuracy:
+- Linear Kernel:
+  Train: 42.19%
+  Test: 41.67%
+- Poly Kernel:
+  Train: 53.12%
+  Test: 50.00%
+- RBF Kernel (ovo):
+  Train: 60.93%
+  Test: 58.33%
+- RBF Kernel (ovo, no scaler):
+  Train: 43.75%
+  Test: 47.22%
+- Sigmoid Kernel:
+  Train: 42.19%
+  Test: 38.89%
+
 #### SVM MAPE (results during parameter selection)
 - Default no scaling (Scikit Linear SVC): 
   Test: 6.47%
