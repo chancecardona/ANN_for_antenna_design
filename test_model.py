@@ -8,6 +8,7 @@ from models.mlp import MLP, get_device
 #from neuro_tf_utils import loss_fn, predict
 
 import pytest
+import torchtest
 from torchtest import assert_vars_change
 from torchtest import assert_vars_same
 from torchtest import test_suite as ts2
@@ -43,7 +44,7 @@ def test_vars_change_succeeds(setup_tests):
     assert_vars_change(
         model=model,
         loss_fn=loss_poles,
-        optim=torch.optim.Adam(model.parameters()),
+        optim=model.optimizer,
         batch=batch,
         device=device)
 
@@ -68,45 +69,44 @@ def test_vars_same_succeeds(setup_tests):
     # test to see if bias remains the same after training
     model, device, batch, params_to_train = setup_tests
     print("Starting test: VARS DONT CHANGE")
-    with pytest.raises(Exception) as e_info:
-        assert_vars_same(
-            model=model,
-            loss_fn=loss_poles,
-            optim=torch.optim.Adam(params_to_train),
-            batch=batch,
-            params=[('bias', model.bias)],
-            device=device
-        )
+    #with pytest.raises(Exception) as e_info:
+    assert_vars_same(
+        model=model,
+        loss_fn=loss_poles,
+        optim=torch.optim.SGD(params_to_train),
+        batch=batch,
+        params=[('bias', model.layers[0].bias)],
+        device=device
+    )
 
+# Commented out as ts2 compares model outputs, which are complex which isn't supported by ts2.
 ## Output Range
-def test_output_range_succeeds(setup_tests):
-    model, device, batch, params_to_train = setup_tests
-    with pytest.raises(Exception) as e_info:
-        print("Starting test: OUTPUT RANGE")
-        # NOTE : bias is fixed (not trainable)
-        optim = torch.optim.Adam(params_to_train)
-        #loss_fn=F.cross_entropy
-        ts2(
-            model=model, 
-            loss_fn=loss_poles, 
-            optim=optim, 
-            batch=batch,
-            output_range=(-2, 2),
-            test_output_range=True,
-            device=device
-        )
+#def test_output_range_succeeds(setup_tests):
+#    model, device, batch, params_to_train = setup_tests
+#    #with pytest.raises(Exception) as e_info:
+#    print("Starting test: OUTPUT RANGE")
+#    # NOTE : bias is fixed (not trainable)
+#    ts2(
+#        model=model, 
+#        loss_fn=loss_poles, 
+#        optim=torch.optim.SGD(params_to_train),
+#        batch=batch,
+#        output_range=(-2, 2),
+#        test_output_range=True,
+#        device=device
+#    )
 
 def test_output_range_fails(setup_tests):
     """ FAILURE """
     #  let's tweak the model to fail the test
     model, device, batch, params_to_train = setup_tests
     with pytest.raises(Exception) as e_info:
-        optim = torch.optim.Adam(params_to_train)
-        model.bias = nn.Parameter(2 + torch.randn(2, ))
+        #optim = torch.optim.Adam(params_to_train)
+        model.layers[0].bias = nn.Parameter(2 + torch.randn(7, ))
         ts2(
             model=model,
             loss_fn=loss_poles, 
-            optim=optim, 
+            optim=model.optimizer, 
             batch=batch,
             output_range=(-1, 1),
             test_output_range=True,
@@ -117,32 +117,32 @@ def test_output_range_fails(setup_tests):
 def test_nan_fails(setup_tests):
     """ FAILURE """
     model, device, batch, params_to_train = setup_tests
-    with pytest.raises(Exception):
+    with pytest.raises(torchtest.torchtest.NaNTensorException) as e_info:
         print("Starting test: NaN")
-        optim = torch.optim.Adam(model.parameters())
-        model.layers[0].bias = nn.Parameter(float('NaN') * torch.randn(2, )) 
+        model.layers[0].bias = nn.Parameter(float('NaN') * torch.randn(7, )) 
         ts2(
             model=model,
             loss_fn=loss_poles, 
-            optim=optim, 
+            optim=model.optimizer,
             batch=batch,
             test_nan_vals=True,
             device=device
         )
+        print(e_info)
    
 ## Inf tensors
 def test_inf_fails(setup_tests):
     """ FAILURE """
     model, device, batch, params_to_train = setup_tests
-    with pytest.raises(Exception):
+    with pytest.raises(torchtest.torchtest.InfTensorException) as e_info:
         print("Starting test: Inf")
-        optim = torch.optim.Adam(model.parameters())
-        model.layers[0].bias = nn.Parameter(float('Inf') * torch.randn(2, ))        
+        model.layers[0].bias = nn.Parameter(float('Inf') * torch.randn(7, ))        
         ts2(
             model=model,
             loss_fn=loss_poles,
-            optim=optim,
+            optim=model.optimizer,
             batch=batch,
             test_inf_vals=True,
             device=device
         )
+        print(e_info)
