@@ -102,7 +102,7 @@ def predict(p_model, r_model, input_X : torch.Tensor, freqs : torch.Tensor) -> t
             return pred_d, pred_e, pred_poles, pred_residues
 
 
-def create_neural_models(vf_series : list, X : torch.Tensor, Y : torch.Tensor, freqs : torch.Tensor, plot : bool = False) -> dict:
+def create_neural_models(vf_series : list, X : torch.Tensor, Y : torch.Tensor, freqs : torch.Tensor, epochs : int = 3, plot : bool = False) -> dict:
     x_dims = len(X[0])
     # This assumes the model order is actually the length of the poles array, and sorts
     # according to that rather than the actual TF order since that corresponds to neuron layers
@@ -123,7 +123,6 @@ def create_neural_models(vf_series : list, X : torch.Tensor, Y : torch.Tensor, f
  
     # Go through each sample, sort by the order (that we got earlier),
     # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the vector fit coeffs fed through the TF.
-    epochs = 3
     for epoch in range(0,epochs):
         print(f"Starting Epoch {epoch}")
         current_loss = 0.0
@@ -197,14 +196,13 @@ def create_neural_models(vf_series : list, X : torch.Tensor, Y : torch.Tensor, f
 
 # X is the geometrical input to the model.
 # Y is only used for training after the predicted coefficients are plugged in.
-def train_neural_models(ANNs : dict, model_orders : np.ndarray, X : torch.Tensor, Y : torch.Tensor, freqs : torch.Tensor):
+def train_neural_models(ANNs : dict, model_orders : np.ndarray, X : torch.Tensor, Y : torch.Tensor, freqs : torch.Tensor, epochs=15):
     device = get_device()
     # Set models to train mode for training in case they're in eval.
     for _,models in ANNs.items():
         [model.train() for model in models]
     # Go through each sample, sort by the order (that we got earlier),
     # predict the coefficients with the ANN's, feed that into the TF, and calc loss with the baseline S-param.
-    epochs = 15
     for epoch in range(0,epochs):
         print(f"Starting Epoch {epoch}")
         current_loss = 0.0

@@ -18,6 +18,7 @@ GHz = 1e9
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Trains or evaluates an ANN to predict the S_11 freq response using .mat files")
     parser.add_argument("--train", action="store_true", help="Train ANNs from the matlab data files. (else will load files if present).")
+    parser.add_argument("--finetune", action="store_true", help="Load and continue to Train ANNs from saved files from a previous --train run.")
     parser.add_argument("--plot", action="store_true", help="Plot data samples with matplotlib.")
     args = parser.parse_args()
 
@@ -52,6 +53,11 @@ if __name__ == "__main__":
     tensor_S_train = torch.tensor(S_11_samples_train, dtype=torch.complex64, device=device)
     tensor_S_test  = torch.tensor(S_11_samples_test, dtype=torch.complex64, device=device)
     
+    # Preprocess data with FourierFeatures for SVM
+    FF = ff.FourierFeatures(3, 8, scale=0.5).to(device)
+    X_fourier = FF(tensor_X).detach().cpu().numpy()
+    X_test_fourier = FF(tensor_X_test).detach().cpu().numpy()
+    
     if args.train: 
         print("Beginning training.")
         # Vector Fitting 
@@ -84,8 +90,6 @@ if __name__ == "__main__":
         clf = make_pipeline(StandardScaler(), svc)
         # Input (X) length, output fourier features (will do 10 of sin/cos each for 20), and std_dev of freq
         # Uncomment this if you want to do fourier features instead. Results in overfitting.
-        FF = ff.FourierFeatures(3, 8, scale=0.5).to(device)
-        X_fourier = FF(tensor_X).detach().cpu().numpy()
         clf.fit(X_fourier, model_orders_observed)
         #clf.fit(X, model_orders_observed)
 
@@ -100,7 +104,6 @@ if __name__ == "__main__":
         
         # SVM predict on Test Data
         print(f"Test Actual (VF) Model Orders: {model_orders_observed}")
-        X_test_fourier = FF(tensor_X_test).detach().cpu().numpy()
         model_orders_test_predicted = clf.predict(X_test_fourier)
         #model_orders_test_predicted = clf.predict(X_test)
         print(f"Test Predicted Model Orders: {model_orders_test_predicted}")
@@ -151,8 +154,8 @@ if __name__ == "__main__":
         clf = joblib.load("model_weights_output/svm.pkl")     
        
         # SVM predict on Train and Test data
-        model_orders_predicted = clf.predict(X)
-        model_orders_test_predicted = clf.predict(X_test)
+        model_orders_predicted = clf.predict(X_fourier)
+        model_orders_test_predicted = clf.predict(X_test_fourier)
         print(f"Train Predicted: {model_orders_predicted}") 
         print(f"Test Predicted: {model_orders_test_predicted}")
           
@@ -162,6 +165,22 @@ if __name__ == "__main__":
             models = [torch.load(f"model_weights_output/s_param_ann_order_{order}_p.pkl"),
                       torch.load(f"model_weights_output/s_param_ann_order_{order}_r.pkl")]
             ANNs[order] = models
+
+    if args.finetune:
+        print("Models loaded, 'finetune' selected. Training more.")
+        for order,models in ANNs.items():
+            for model in models:
+                model.optimizer = torch.optim.SGD(model.parameters(), lr=0.000002, momentum=0.9)
+        train_neural_models(ANNs, model_orders_predicted, tensor_X, tensor_S_train, tensor_freqs, epochs=5)
+
+        save_models = input("Training finished, save models? Y/n")
+        if save_models.lower() == "y":
+            print("Saving models.")
+            for order,models in ANNs.items():
+                torch.save(models[0], f"model_weights_output/s_param_ann_order_{order}_p.pkl")
+                torch.save(models[1], f"model_weights_output/s_param_ann_order_{order}_r.pkl")
+        else:
+            print("Models not saved.")
 
     print(f"Now beginning inference.")
     # Sanity check with Training data
