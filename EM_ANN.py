@@ -162,18 +162,18 @@ if __name__ == "__main__":
         
         ANNs = {}
         for order in set(np.concatenate([model_orders_predicted, model_orders_test_predicted])):
-            models = [torch.load(f"model_weights_output/s_param_ann_order_{order}_p.pkl"),
-                      torch.load(f"model_weights_output/s_param_ann_order_{order}_r.pkl")]
+            models = [torch.load(f"model_weights_output/s_param_ann_order_{order}_p.pkl", map_location=device),
+                      torch.load(f"model_weights_output/s_param_ann_order_{order}_r.pkl", map_location=device)]
             ANNs[order] = models
 
     if args.finetune:
         print("Models loaded, 'finetune' selected. Training more.")
         for order,models in ANNs.items():
             for model in models:
-                model.optimizer = torch.optim.SGD(model.parameters(), lr=0.000002, momentum=0.9)
+                model.optimizer = torch.optim.SGD(model.parameters(), lr=0.000001, momentum=0.8)
         train_neural_models(ANNs, model_orders_predicted, tensor_X, tensor_S_train, tensor_freqs, epochs=5)
 
-        save_models = input("Training finished, save models? Y/n")
+        save_models = input("Training finished, save models? Y/n: ")
         if save_models.lower() == "y":
             print("Saving models.")
             for order,models in ANNs.items():
