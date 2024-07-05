@@ -7,6 +7,7 @@ import matplotlib.pyplot as mplt
 class FourierFeatures(nn.Module):
     def __init__(self, input_dim, num_features, scale=10):
         super(FourierFeatures, self).__init__()
+        torch.manual_seed(17) # Seed for reproducability
         # Creating the B matrix
         self.B = nn.Parameter(torch.randn(size=(num_features, input_dim)) * scale, requires_grad=False)
 

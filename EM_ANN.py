@@ -127,9 +127,9 @@ if __name__ == "__main__":
         ## Train ANN on EM simulation results and Outputs of pole-residue-based transfer function: ##
         print(f"Training ANNs now...")
 
-        ANNs = create_neural_models(vf_samples, tensor_X, tensor_S_train, tensor_freqs, plot=args.plot)
+        ANNs = create_neural_models(vf_samples, tensor_X, tensor_S_train, tensor_freqs, plot=args.plot, epochs=0)
         print("Pre-training on vector-fitting coefficients finished. Beginning fine-tuning with training data.")
-        train_neural_models(ANNs, model_orders_predicted, tensor_X, tensor_S_train, tensor_freqs)
+        train_neural_models(ANNs, model_orders_predicted, tensor_X, tensor_S_train, tensor_freqs, epochs=18)
 
         print("Training finished, saving models.")
         for order,models in ANNs.items():
@@ -171,9 +171,9 @@ if __name__ == "__main__":
         for order,models in ANNs.items():
             for model in models:
                 model.optimizer = torch.optim.SGD(model.parameters(), lr=0.000002, momentum=0.9)
-        train_neural_models(ANNs, model_orders_predicted, tensor_X, tensor_S_train, tensor_freqs, epochs=5)
+        train_neural_models(ANNs, model_orders_predicted, tensor_X, tensor_S_train, tensor_freqs, epochs=3)
 
-        save_models = input("Training finished, save models? Y/n")
+        save_models = input("Training finished, save models? Y/n: ")
         if save_models.lower() == "y":
             print("Saving models.")
             for order,models in ANNs.items():
