@@ -30,8 +30,8 @@ def mlp_layers(input_size : int, hidden_size : int, output_size : int):
         nn.Linear(hidden_size, hidden_size),
         nn.ReLU(),
         # Second hidden layer (Fully Connected)
-        nn.Linear(hidden_size, hidden_size),
-        nn.ReLU(),
+        #nn.Linear(hidden_size, hidden_size),
+        #nn.ReLU(),
         # Output layer
         nn.Linear(hidden_size, output_size),
     )
@@ -49,15 +49,15 @@ class MLP(nn.Module):
         fourier_output_size = 2 * fourier_features_size # 2 for sin and cos.
         # Hecht-Nelson method to determine the node number of the hidden layer: 
         # node number of hidden layer is (2n+1) when input layer is (n).
-        self.hidden_size = self.model_order*2 #(2*input_size + 1)
+        self.hidden_size = self.model_order*4 #(2*input_size + 1)
         #self.hidden_size = (2*fourier_output_size + 1)
         # The output size is 2 times the model order (len of poles) since each coeff is a complex value (return 0im if real only). 
         # +1 because one model predicts d, the other predicts e for the PoleResidueTF.
         self.output_size = (model_order * 2 + 1)# * 2
 
         # Define the mlp layers
-        self.layers = mlp_layers(fourier_output_size, self.hidden_size, self.output_size)
-        #self.layers = mlp_layers(input_size, self.hidden_size, self.output_size)
+        #self.layers = mlp_layers(fourier_output_size, self.hidden_size, self.output_size)
+        self.layers = mlp_layers(input_size, self.hidden_size, self.output_size)
 
         # Not using double currently as https://discuss.pytorch.org/t/problems-with-target-arrays-of-int-int32-types-in-loss-functions/140/2
         #self.double()
@@ -72,8 +72,8 @@ class MLP(nn.Module):
 
     def forward(self, x : torch.Tensor) -> torch.Tensor:
         # Fourier Feature the x data since it's low dim and this normalizes it
-        x_fourier = self.fourier_features(x)
-        #x_fourier = F.normalize(x, dim=0)
+        #x_fourier = self.fourier_features(x)
+        x_fourier = F.normalize(x, dim=0)
 
         # Get the d, e constants, the poles, and the residues.
         pred_coeffs = self.layers(x_fourier)
