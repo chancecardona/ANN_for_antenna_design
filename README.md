@@ -9,20 +9,27 @@ You can use [pyenv](https://github.com/pyenv/pyenv) to manage this.
 ```
 pyenv install 3.9
 pyenv local 3.9
+sudo apt install git-lfs
 ```
 
 ### Installation
-You should also have CUDA installed along with necessary drivers for your GPU.
+First install the python dependencies.
 ```
 pip3 install -r requirements.txt
+git lfs install
 ```
+
+You should also have CUDA installed along with necessary drivers for your GPU.
+
+Also make sure that you `git lfs pull` if it was not installed prior to pull (or else you will need to train from scratch,  which is ok).
 
 ## Testing the Code
 ### Training
 ```
 python3 EM_ANN.py --train
 ```
-There's also a `--plot` option to plot the results during each intermediate step.
+- There's also a `--plot` option to plot the results during each intermediate step.
+- There's also a `--finetune` option to load the previously trained and saved model, and train more on it.
 
 ### Inference
 If using Git-LFS you should be able to run in inference mode right away.

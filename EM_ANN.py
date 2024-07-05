@@ -162,8 +162,8 @@ if __name__ == "__main__":
         
         ANNs = {}
         for order in set(np.concatenate([model_orders_predicted, model_orders_test_predicted])):
-            models = [torch.load(f"model_weights_output/s_param_ann_order_{order}_p.pkl"),
-                      torch.load(f"model_weights_output/s_param_ann_order_{order}_r.pkl")]
+            models = [torch.load(f"model_weights_output/s_param_ann_order_{order}_p.pkl", map_location=device),
+                      torch.load(f"model_weights_output/s_param_ann_order_{order}_r.pkl", map_location=device)]
             ANNs[order] = models
 
     if args.finetune:
