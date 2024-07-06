@@ -129,7 +129,7 @@ if __name__ == "__main__":
 
         ANNs = create_neural_models(vf_samples, tensor_X, tensor_S_train, tensor_freqs, plot=args.plot, epochs=0)
         print("Pre-training on vector-fitting coefficients finished. Beginning fine-tuning with training data.")
-        train_neural_models(ANNs, model_orders_predicted, tensor_X, tensor_S_train, tensor_freqs, epochs=18)
+        train_neural_models(ANNs, model_orders_predicted, tensor_X, tensor_S_train, tensor_freqs, epochs=36)
 
         print("Training finished, saving models.")
         for order,models in ANNs.items():

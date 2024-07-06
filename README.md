@@ -43,75 +43,65 @@ To run pytest and test the neural net:
 pytest test_model.py
 ```
 
+## Methods:
+
+I attempted a few different NN architectures during training, including adding [Fourier Features](https://arxiv.org/pdf/2006.10739) to extract higher frequency information.
+
+I originally attempted to create 1 Neural Net that would output all pole residue coefficients, but due to them mapping potentially unrelated nonlinear functions I chose to brea them into 2, and have each one predict one of the constant coefficients of the vector fitting function.
+
+I also varied between 1 and 2 hidden layers to see which would fit better, and varied the number of hidden nodes.
+
+I also sampled different loss functions to see if it was feasible to pre train the model to predict the coefficients themselves (and compare with an L2 norm distance), but this didn't result in the best loss function for convergence during training, and was found would make the training part take longer.
+
 ## Results:
 The results are promising! 
-We have a similar error value for the SVM's as the literature.
-The ANNs' error value is higher, but this is due to slow convergence during model fitting.  
-I tried to vary the learning rate but it learns very slow until it is high, in which case it learns chaotically.
-I tried this with Adam as the optimizer, but also with NAdam, but didn't see great results; given it was slow I didn't think another optimizer like SGD would be better.
-In the future we could try SOPHIA-H/G perhaps.
-In practice I solved this problem by using a learning rate Scheduler so it could start high and decay over a long amount of epochs.
-I also added a Fourier Feature function to the input instead of typical normalization to help the MLP capture the higher frequency terms during training.
+The ANNs' error value for me is higher than the literature, but this is due to slow convergence during model fitting, and me not using more than 18 training epochs for this typically.
+Currently the ANN predicts roughly the average function found in each order, and seems to have some trouble predicting the finer patterns found in geometry.
+I think this is largely due to just the general shape of the loss function and the optimizer, which seems to get stuck in local minima.
+As a result of this, during testing I added another hidden layer, which did result in the function fitting faster, but overall having similar characteristics as the 1 hidden layer version. Further increasing the hidden nodes in this configuration followed this trend, but some model orders like 7 did fit better.
 
-This slight difference in learning convergence could be resolved with model fine tuning such as adjusting the hyperparameters more (different optimizer, different learning rate, more/less hidden neurons), training each order of ANN more (such as order 9, which seems to learn slowly given the training data set), and by adjusting learning parameters based on the order (like having a higher rate for 9) and adding epochs until convergence.  
+When I used a singleh hidden layer but doubled the hidden nodes count, which may be justified if the poles / residues are discontinuous and thus more nonlinear, the model seemed to fit similarly to the 2 hidden layer version using the same amount of hidden nodes.
+
+Fourier Features greatly improved the training of the SVM order classification, and were used for that step.
+For the ANNs however, adding Fourier Features instead of typical normalization from the data didn't seem to have much results in the fit function, even with a large "scale" (the standard deviation of the frequency of sin/cos waves), this typically resulted in the model taking longer to train and fitting roughly the same, but with some more noise.
+
+I ad hoc tried Adam, AdamW, NAdam, and SGD with Momentum as various optimizers. Overall SGD performs the best once the model begins to converge, but NAdam and AdamW tend to combine the best results without running into NaN's during training if a hyperparameter is slightly off, and with the help of a learning rate scheduler can be scaled to more epochs, while having similar testing results as training, indiciating generalization.
+
+### Future
+The quickest addition would be to train each model until their loss dropped below a threshold (< ~1.0) and then stop training automatically, as the fewer seen samples (7, 11) are typically underfit with the current scheme unless overfitting the others.
+The next step would be to smooth any discontinous poles / residues from the Vector Function, which would reduce the hidden neurons required.
 Adding this to a grid_based hyperparameter search batch would be the next steps, and pruned based on convergence. 
-See [SophiaG_Optimizer](https://github.com/Liuhong99/Sophia) for more on batching and searching with a different optimizer.
-This also could have been improved by more hypothetical accuracy in the SVM with a different kernel or parameters.
+See [SophiaG_Optimizer](https://github.com/Liuhong99/Sophia) for more on batching and searching with different optimizers.
 
-### SVM MAPE 
-- Training: 9.35%
-- Testing: 8.92%
-### ANN Error (Current)
-- Training Average: 213.16%
-    8: ~360
-    9: ~320
-    11: ~40
-- Testing Average: 446.92%
+This also could have been improved by more hypothetical accuracy in the SVM (perhaps with a custom kernel function for this domain), as the current one tests at about 50% accuracy, and misplacing a response into the wrong order will result in the order needing to retrain for that domain, often incorrectly. 
 
-Overall this shows accurate replication of the paper.
-More results from parameter selection are included below.
 
-### Training Parameters
-#### SVM Accuracy:
+### Training Results
+#### ANN Accuracy:
+    Average Train MAPE: 435%
+    Average Test: 371% (due to it being more 8 samples)
+### SVM Accuracy:
+    Average Train: 85%
+    Average Test: 50%
+
+
+### Training Parameter selection Results
+#### SVM Parameter selection Accuracy (before "classes equal" which lowered it, but was helped by FourierFeature analysis):
 - Linear Kernel:
   Train: 42.19%
   Test: 41.67%
 - Poly Kernel:
   Train: 53.12%
   Test: 50.00%
-- RBF Kernel (ovo):
+- RBF Kernel:
   Train: 60.93%
   Test: 58.33%
-- RBF Kernel (ovo, no scaler):
+- RBF Kernel (no scaler):
   Train: 43.75%
   Test: 47.22%
 - Sigmoid Kernel:
   Train: 42.19%
   Test: 38.89%
-
-#### SVM MAPE (results during parameter selection)
-- Default no scaling (Scikit Linear SVC): 
-  Test: 6.47%
-- Scaled Data: 
-  Test: 4.406%, 4.01%, Train: 5.707%
-  (All data after this is assumed scaled as it helps)
-- RBF Kernel: 
-  Test: 4.406%, Train: 4.76%
-- Sigmoid Kernel: 
-  Test: 3.647%, Train: 4.90%
-- Polynomial Kernel: 
-  Test: 5.656%
-
-#### ANN MAPE
-- LR_initial = 0.7, LR_decay=0.6 (step size 3):
-    - Training Average: 130.04%
-    - Testing Average: 124.41%
-- LR_initial = 0.2, LR_decay=0.85 (step size 3)
-    - Training Average: 336.18%
-        8: ~30
-        9: ~150
-        11: ~40
-    - Testing Average: 349.05%
 
 ## Info
 ### Data Format
