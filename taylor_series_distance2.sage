@@ -22,7 +22,11 @@ f(x,y,z) = sum((1 / sqrt(1 + expr)) for expr in [x_expr, x_expr_n, y_expr, y_exp
 total_series = f.taylor((x, 0), (y, 0), (z, 0), 6)
 
 print("Before filtering higher order terms:")
-print(total_series.polynomial(QQ)) 
+print(total_series.polynomial(QQ))
+# Be sure to expand otherwise order filtering will be off.
+total_series = total_series.expand()
+#for t in total_series.iterator():
+#    print(t, t.degree(x), t.degree(y), t.degree(z))
 
 filtered_series = sum(t for t in total_series.iterator() if (t.degree(x) + t.degree(y) + t.degree(z)) < 6)
 print("After:")
