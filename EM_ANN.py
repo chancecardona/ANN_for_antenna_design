@@ -49,6 +49,7 @@ if __name__ == "__main__":
     freqs = Y_data[:, :, 0]
     S_11_samples_train = Y_data[:, :, 1] + Y_data[:, :, 2] * 1j
     S_11_samples_test = Y_test_data[:, :, 1] + (Y_test_data[:, :, 2] * 1j)
+
     tensor_freqs = torch.tensor(freqs, dtype=torch.float32, device=device)
     tensor_S_train = torch.tensor(S_11_samples_train, dtype=torch.complex64, device=device)
     tensor_S_test  = torch.tensor(S_11_samples_test, dtype=torch.complex64, device=device)
@@ -85,7 +86,8 @@ if __name__ == "__main__":
         # Need to predict the Order based on the input S-parameter (over frequency space).
         # tried over ['linear', 'poly', 'rbf', sigmoid']. ovo vs ovr doesn't seem to matter.
         #svc = svm.SVC(kernel='rbf') # Use this class if not using "balanced" or FourierFeatures.
-        svc = svm.SVC(kernel='poly', degree=6, class_weight="balanced")
+        # Use probability (otherwise it doesn't calculate their cross validation) and set the random state seed.
+        svc = svm.SVC(kernel='poly', degree=6, class_weight="balanced", probability=True, random_state=1)
         # Scale data with the StandardScaler
         clf = make_pipeline(StandardScaler(), svc)
         # Input (X) length, output fourier features (will do 10 of sin/cos each for 20), and std_dev of freq
